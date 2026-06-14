@@ -50,7 +50,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
-import { initMercadoPago, Wallet } from "@mercadopago/sdk-react";
+import { initMercadoPago, Payment } from "@mercadopago/sdk-react";
 
 initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80", { locale: "pt-BR" });
 
@@ -1789,7 +1789,7 @@ export default function CadastroApp({ onBack = () => {} }) {
               </span>
             </div>
 
-            {/* Botão que gera a preferência e mostra o Wallet Brick */}
+            {/* Payment Brick — checkout transparente (PIX, cartão, boleto) */}
             {!mpPreferenceId ? (
               <Button
                 className="w-full h-14"
@@ -1802,16 +1802,41 @@ export default function CadastroApp({ onBack = () => {} }) {
             ) : (
               <div>
                 <p className="text-xs text-zinc-500 text-center mb-4">
-                  Escolha como quer pagar — PIX, cartão de crédito e mais:
+                  Pague com PIX, cartão de crédito ou boleto:
                 </p>
-                {/* Wallet Brick do Mercado Pago — renderiza o checkout completo aqui */}
-                <Wallet
-                  initialization={{ preferenceId: mpPreferenceId, redirectMode: "modal" }}
-                  customization={{
-                    texts: { valueProp: "smart_option" },
-                    visual: { buttonBackground: "black", borderRadius: "12px" },
+                {/* Payment Brick — renderiza diretamente sem redirecionar para conta MP */}
+                <Payment
+                  initialization={{
+                    amount: totalCart,
+                    preferenceId: mpPreferenceId,
                   }}
-                  onSubmit={handleMpSuccess}
+                  customization={{
+                    paymentMethods: {
+                      ticket: "all",
+                      bankTransfer: "all",
+                      creditCard: "all",
+                      debitCard: "all",
+                      mercadoPago: "wallet_purchase",
+                    },
+                  }}
+                  onSubmit={async ({ selectedPaymentMethod, formData: mpFormData }) => {
+                    try {
+                      const res = await fetch("/api/process-payment", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(mpFormData),
+                      });
+                      const result = await res.json();
+                      if (result.status === "approved" || result.status === "pending") {
+                        await handleMpSuccess({ paymentId: result.id });
+                      } else {
+                        showToast("Pagamento não aprovado. Tente novamente.");
+                      }
+                    } catch (err) {
+                      console.error(err);
+                      showToast("Erro ao processar pagamento.");
+                    }
+                  }}
                   onError={(err) => {
                     console.error("MP Brick error:", err);
                     showToast("Erro no checkout. Tente novamente.");
@@ -1822,7 +1847,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                   onClick={() => setMpPreferenceId(null)}
                   className="w-full mt-3 text-xs text-zinc-600 hover:text-zinc-400 transition"
                 >
-                  Cancelar e escolher outra forma
+                  Cancelar
                 </button>
               </div>
             )}
