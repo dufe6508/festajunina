@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Festa Junina 2026 · EE Cláudio Brandão</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0e0e0e;
+        --bg2: #161616;
+        --ink: #f0f0ee;
+        --ink2: #888888;
+        --ink3: #555555;
+        --accent: #4f7ef7;
+        --accent-hover: #3a68e0;
+        --border: #252525;
+        --radius: 16px;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Inter", system-ui, sans-serif;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── NAV ── */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        height: 70px;
+        background: rgba(14, 14, 14, 0.85);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+        scrollbar-width: none; /* Firefox */
+      }
+      nav::-webkit-scrollbar {
+        display: none; /* Chrome/Safari */
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 40px;
+        min-width: max-content;
+        height: 100%;
+        gap: 40px;
+      }
+      .nav-logo {
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .nav-logo img {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        mix-blend-mode: screen;
+      }
+      .nav-links {
+        display: flex;
+        gap: 32px;
+        align-items: center;
+      }
+      .nav-links a {
+        font-size: 13px;
+        color: var(--ink2);
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.15s;
+      }
+      .nav-links a:hover {
+        color: var(--ink);
+      }
+      .nav-cta {
+        background: var(--ink);
+        color: var(--bg);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 10px 20px;
+        border-radius: 8px;
+        text-decoration: none;
+        transition: background 0.15s;
+        letter-spacing: 0.01em;
+        cursor: pointer;
+      }
+      .nav-cta:hover {
+        background: #2a2a2a;
+      }
+
+      /* ── HERO ── */
+      #hero {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 140px 24px 80px;
+        position: relative;
+      }
+      .hero-ticket-wrapper {
+        width: 100%;
+        max-width: 900px;
+        margin: 0 auto 48px;
+        filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.5));
+        opacity: 0;
+        animation: fadeUp 0.8s 0.1s ease forwards;
+      }
+      .hero-ticket {
+        display: flex;
+        flex-direction: row; /* Força horizontal sempre */
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        position: relative;
+      }
+      .ht-left {
+        flex: 1.2;
+        padding: clamp(24px, 5vw, 56px) clamp(20px, 5vw, 64px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border-radius: 24px 0 0 24px;
+      }
+      .ht-label {
+        font-size: clamp(9px, 2vw, 12px);
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: clamp(12px, 3vw, 16px);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ht-title {
+        font-size: clamp(28px, 6vw, 88px);
+        font-weight: 900;
+        line-height: 0.9;
+        letter-spacing: -0.04em;
+        text-transform: uppercase;
+        color: var(--ink);
+        margin-bottom: clamp(16px, 3vw, 32px);
+      }
+      .ht-barcode {
+        height: clamp(16px, 3vw, 24px);
+        width: 100%;
+        max-width: clamp(140px, 30vw, 240px);
+        background: linear-gradient(
+          to right,
+          var(--ink) 0%, var(--ink) 8%, transparent 8%, transparent 12%,
+          var(--ink) 12%, var(--ink) 16%, transparent 16%, transparent 24%,
+          var(--ink) 24%, var(--ink) 36%, transparent 36%, transparent 42%,
+          var(--ink) 42%, var(--ink) 46%, transparent 46%, transparent 50%,
+          var(--ink) 90%,
+          transparent 90%,
+          transparent 100%
+        );
+        opacity: 0.3;
+      }
+
+      .ht-right {
+        padding: clamp(16px, 4vw, 48px);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+        border-left: 2px dashed var(--border);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-width: 0;
+        position: relative;
+        border-radius: 0 24px 24px 0;
+      }
+      .ht-cutout-top,
+      .ht-cutout-bottom {
+        position: absolute;
+        width: 26px;
+        background: var(--bg);
+        z-index: 10;
+      }
+      .ht-cutout-top {
+        top: -1px;
+        left: -14px; /* Centraliza perfeitamente na borda tracejada de 2px */
+        height: 13px;
+        border-radius: 0 0 13px 13px;
+        border: 1px solid var(--border);
+        border-top: none; /* Remove a borda reta para não riscar o meio */
+      }
+      .ht-cutout-bottom {
+        bottom: -1px;
+        left: -14px;
+        height: 13px;
+        border-radius: 13px 13px 0 0;
+        border: 1px solid var(--border);
+        border-bottom: none;
+      }
+
+      .cd-title {
+        font-size: clamp(9px, 2vw, 11px);
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin-bottom: clamp(16px, 3vw, 24px);
+        text-align: center;
+      }
+      .cd-inline {
+        display: flex;
+        align-items: center;
+        gap: clamp(4px, 1.5vw, 12px);
+      }
+      .cd-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        min-width: clamp(28px, 5vw, 48px);
+      }
+      .cd-val {
+        font-family: "JetBrains Mono", monospace;
+        font-size: clamp(16px, 4.5vw, 32px);
+        font-weight: 700;
+        color: var(--ink);
+        line-height: 1;
+      }
+      .cd-lbl {
+        font-size: clamp(8px, 1.5vw, 10px);
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink2);
+      }
+      .cd-sep {
+        font-size: clamp(16px, 4vw, 24px);
+        color: var(--border);
+        font-weight: 300;
+        transform: translateY(clamp(-2px, -0.5vw, -8px));
+      }
+
+      .hero-chips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-bottom: 40px;
+        opacity: 0;
+        animation: fadeUp 0.6s 0.3s ease forwards;
+      }
+      .chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 100px;
+        padding: 10px 18px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--ink2);
+      }
+      .chip svg {
+        width: 16px;
+        height: 16px;
+        stroke: var(--ink3);
+        stroke-width: 2;
+        fill: none;
+        flex-shrink: 0;
+      }
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+        opacity: 0;
+        animation: fadeUp 0.6s 0.45s ease forwards;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        font-size: 15px;
+        font-weight: 700;
+        padding: 16px 36px;
+        border-radius: 12px;
+        border: none;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.15s;
+        letter-spacing: 0.01em;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        transform: translateY(-2px);
+      }
+      .btn-secondary {
+        background: transparent;
+        color: var(--ink2);
+        font-size: 15px;
+        font-weight: 600;
+        padding: 16px 36px;
+        border-radius: 12px;
+        border: 1.5px solid var(--border);
+        cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .btn-secondary:hover {
+        border-color: #555;
+        color: var(--ink);
+      }
+
+      /* ── SECTIONS ── */
+      .section {
+        padding: 100px 24px;
+      }
+      .section-inner {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      .section-tag {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 12px;
+      }
+      .section-title {
+        font-size: clamp(28px, 4vw, 44px);
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        line-height: 1.08;
+        margin-bottom: 16px;
+        color: var(--ink);
+      }
+      .section-sub {
+        font-size: 16px;
+        line-height: 1.7;
+        color: var(--ink2);
+        max-width: 500px;
+      }
+
+      /* ── SOBRE ── */
+      #sobre .layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 80px;
+        align-items: center;
+      }
+      .info-list {
+        display: flex;
+        flex-direction: column;
+      }
+      .info-row {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 24px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .info-row:first-child {
+        border-top: 1px solid var(--border);
+      }
+      .info-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: var(--bg2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .info-icon svg {
+        width: 20px;
+        height: 20px;
+        stroke: var(--ink2);
+        stroke-width: 2;
+        fill: none;
+      }
+      .info-text .lbl {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin-bottom: 4px;
+      }
+      .info-text .val {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      /* ── INGRESSO SEC. ── */
+      #ingresso {
+        background: var(--bg2);
+      }
+      .ticket-wrap {
+        display: flex;
+        justify-content: center;
+        margin-top: 56px;
+      }
+      .ticket {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        width: 100%;
+        max-width: 440px;
+        overflow: hidden;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      }
+      .ticket-head {
+        padding: 36px 36px 32px;
+        border-bottom: 1px dashed var(--border);
+        position: relative;
+      }
+      .ticket-issuer {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin-bottom: 12px;
+      }
+      .ticket-event-name {
+        font-size: 32px;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        color: var(--ink);
+        margin-bottom: 32px;
+      }
+      .ticket-meta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      .tm-item .tm-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin-bottom: 4px;
+      }
+      .tm-item .tm-val {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .ticket-foot {
+        padding: 32px 36px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .price-lbl {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin-bottom: 6px;
+      }
+      .price-amount {
+        font-size: 44px;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+        line-height: 1;
+      }
+      .price-note {
+        font-size: 12px;
+        color: var(--ink3);
+        margin-top: 6px;
+      }
+      .qr-wrap {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      .qr-svg {
+        width: 84px;
+        height: 84px;
+        color: var(--ink);
+      }
+      .qr-lbl {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink3);
+      }
+      .ticket-cta-wrap {
+        padding: 0 36px 36px;
+      }
+      .ticket-cta {
+        width: 100%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 18px;
+        border: none;
+        border-radius: 14px;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .ticket-cta:hover {
+        background: var(--accent-hover);
+      }
+
+      /* ── COMO & FAQ ── */
+      #como {
+        background: var(--bg);
+        border-top: 1px solid var(--border);
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        overflow: hidden;
+        margin-top: 56px;
+      }
+      .step {
+        background: var(--bg2);
+        padding: 40px 32px;
+      }
+      .step-n {
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        color: var(--accent);
+        margin-bottom: 20px;
+      }
+      .step-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--ink);
+        margin-bottom: 10px;
+      }
+      .step-desc {
+        font-size: 14px;
+        line-height: 1.65;
+        color: var(--ink2);
+      }
+
+      #faq .faq-list {
+        margin-top: 56px;
+        max-width: 720px;
+      }
+      .faq-item {
+        border-bottom: 1px solid var(--border);
+      }
+      .faq-item:first-child {
+        border-top: 1px solid var(--border);
+      }
+      .faq-q {
+        width: 100%;
+        background: none;
+        border: none;
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: 600;
+        padding: 24px 0;
+        text-align: left;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        font-family: inherit;
+        transition: color 0.15s;
+      }
+      .faq-q:hover {
+        color: var(--accent);
+      }
+      .faq-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: transform 0.25s, background 0.15s;
+        font-size: 14px;
+        color: var(--ink2);
+      }
+      .faq-item.open .faq-icon {
+        transform: rotate(45deg);
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .faq-a {
+        font-size: 15px;
+        line-height: 1.75;
+        color: var(--ink2);
+        padding: 0 0 24px;
+        display: none;
+        max-width: 600px;
+      }
+      .faq-item.open .faq-a {
+        display: block;
+      }
+
+      /* ── FOOTER ── */
+      footer {
+        border-top: 1px solid var(--border);
+        padding: 48px 24px;
+        text-align: center;
+        background: var(--bg2);
+      }
+      footer p {
+        font-size: 14px;
+        color: var(--ink3);
+        line-height: 1.9;
+      }
+      footer strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      /* ── MODAL TERMOS DE USO ── */
+      .modal-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(8px);
+        z-index: 999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+      .modal-overlay.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .modal-content {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        width: 100%;
+        max-width: 640px;
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 40px;
+        position: relative;
+        transform: translateY(20px);
+        transition: transform 0.3s ease;
+        text-align: left;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      }
+      .modal-overlay.active .modal-content {
+        transform: translateY(0);
+      }
+      .modal-close {
+        position: absolute;
+        top: 24px;
+        right: 24px;
+        background: var(--border);
+        border: none;
+        color: var(--ink);
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s, color 0.2s;
+      }
+      .modal-close:hover {
+        background: var(--ink2);
+        color: #fff;
+      }
+      .modal-body h3 {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 16px;
+        color: var(--ink);
+        padding-right: 32px;
+      }
+      .modal-body h4 {
+        font-size: 15px;
+        font-weight: 700;
+        margin-top: 32px;
+        margin-bottom: 12px;
+        color: var(--ink);
+      }
+      .modal-body p, .modal-body ul {
+        font-size: 14px;
+        line-height: 1.7;
+        color: var(--ink2);
+        margin-bottom: 16px;
+      }
+      .modal-body ul {
+        padding-left: 20px;
+      }
+      .modal-body li {
+        margin-bottom: 8px;
+      }
+
+      /* ── ANIMATIONS ── */
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(24px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes bounce {
+        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-6px); }
+        60% { transform: translateY(-3px); }
+      }
+      .hero-scroll-hint {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        margin-top: 56px;
+        opacity: 0;
+        animation: fadeUp 0.8s 0.6s ease forwards;
+      }
+      .hero-scroll-hint span {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--ink3);
+      }
+      .hero-scroll-hint svg {
+        width: 16px;
+        height: 16px;
+        stroke: var(--ink3);
+        animation: bounce 2s infinite;
+      }
+      .reveal {
+        opacity: 0;
+        transform: translateY(24px);
+        transition: opacity 0.7s ease, transform 0.7s ease;
+      }
+      .reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* ── RESPONSIVE ── */
+      @media (max-width: 900px) {
+        #sobre .layout {
+          grid-template-columns: 1fr;
+          gap: 56px;
+        }
+      }
+      @media (max-width: 500px) {
+        .hide-mob {
+          display: none;
+        }
+        .nav-inner {
+          padding: 0 8px;
+          justify-content: center;
+        }
+        .nav-logo {
+          display: none;
+        }
+        .nav-links {
+          gap: 12px;
+          width: 100%;
+          justify-content: center;
+        }
+        .nav-links a {
+          font-size: 11px;
+        }
+        .nav-cta {
+          font-size: 11px;
+          padding: 8px 12px;
+        }
+        .section {
+          padding: 80px 20px;
+        }
+        .ticket-head,
+        .ticket-foot {
+          padding-left: 24px;
+          padding-right: 24px;
+        }
+        .ticket-cta-wrap {
+          padding: 0 24px 24px;
+        }
+        .btn-primary,
+        .btn-secondary {
+          width: 100%;
+        }
+        .modal-content {
+          padding: 32px 24px;
+          width: 95%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- NAV -->
+    <nav>
+      <div class="nav-inner">
+        <div class="nav-logo">
+          <img src="image_cf7540.jpg" alt="Logo EE Cláudio Brandão" onerror="this.style.display='none'"/>
+        </div>
+        <div class="nav-links">
+          <a href="#sobre">Sobre</a>
+          <a href="#ingresso">Ingresso</a>
+          <a href="#como">Passo a passo</a>
+          <a
+            class="nav-cta"
+            onclick="window.parent.postMessage('open-cadastro', '*'); return false;"
+            href="#"
+            >Comprar<span class="hide-mob"> Ingresso</span></a
+          >
+        </div>
+      </div>
+    </nav>
+
+    <!-- HERO -->
+    <section id="hero">
+      <div class="hero-ticket-wrapper">
+        <div class="hero-ticket">
+          <div class="ht-left">
+            <div class="ht-label">Evento Oficial 2026</div>
+            <h1 class="ht-title">Festa<br />Junina</h1>
+            <div class="ht-barcode"></div>
+          </div>
+          <div class="ht-right">
+            <div class="ht-cutout-top"></div>
+            <div class="ht-cutout-bottom"></div>
+
+            <p class="cd-title">Contagem Regressiva</p>
+            <div class="cd-inline">
+              <div class="cd-item">
+                <span class="cd-val" id="cd-d">00</span
+                ><span class="cd-lbl">Dias</span>
+              </div>
+              <div class="cd-sep">:</div>
+              <div class="cd-item">
+                <span class="cd-val" id="cd-h">00</span
+                ><span class="cd-lbl">Hrs</span>
+              </div>
+              <div class="cd-sep">:</div>
+              <div class="cd-item">
+                <span class="cd-val" id="cd-m">00</span
+                ><span class="cd-lbl">Min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-chips">
+        <div class="chip">
+          <svg viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          27 de junho de 2026
+        </div>
+        <div class="chip">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          13h às 17h
+        </div>
+        <div class="chip">
+          <svg viewBox="0 0 24 24">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+            <circle cx="12" cy="10" r="3" />
+          </svg>
+          E. Aires da Mata Machado
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <button
+          class="btn-primary"
+          onclick="window.parent.postMessage('open-cadastro', '*')"
+        >
+          Garantir meu ingresso
+        </button>
+        <button
+          class="btn-secondary"
+          onclick="document.getElementById('sobre').scrollIntoView()"
+        >
+          Ver detalhes
+        </button>
+      </div>
+
+      <div class="hero-scroll-hint">
+        <span>Rolar para baixo</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M19 12l-7 7-7-7"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- SOBRE -->
+    <section id="sobre" class="section">
+      <div class="section-inner">
+        <div class="layout">
+          <div class="reveal">
+            <p class="section-tag">O evento</p>
+            <h2 class="section-title">Uma tarde de festa, comida e alegria</h2>
+            <p class="section-sub">
+              A Festa Junina da Escola Estadual Cláudio Brandão reúne alunos,
+              famílias e a comunidade para celebrar com muita animação, comidas
+              típicas e atividades especiais.
+            </p>
+          </div>
+          <div class="info-list reveal">
+            <div class="info-row">
+              <div class="info-icon">
+                <svg viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </div>
+              <div class="info-text">
+                <div class="lbl">Data</div>
+                <div class="val">27 de junho de 2026, Sábado</div>
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="info-icon">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+              </div>
+              <div class="info-text">
+                <div class="lbl">Horário</div>
+                <div class="val">13h às 17h · Abertura às 12h30</div>
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="info-icon">
+                <svg viewBox="0 0 24 24">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+              </div>
+              <div class="info-text">
+                <div class="lbl">Local</div>
+                <div class="val">
+                  Escola Aires da Mata Machado<br />
+                  <span style="font-size: 13px; color: var(--ink2); font-weight: 400; margin-top: 4px; display: inline-block;">Av. Senador Levindo Coelho, 632</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INGRESSO -->
+    <section id="ingresso" class="section">
+      <div class="section-inner" style="text-align: center">
+        <p class="section-tag reveal">Ingressos</p>
+        <h2 class="section-title reveal">Garanta sua entrada</h2>
+        <p class="section-sub reveal" style="margin: 0 auto 48px">
+          Pagamento via PIX ou cartão. O ingresso digital chega no seu e-mail em
+          minutos.
+        </p>
+        <div class="ticket-wrap reveal">
+          <div class="ticket">
+            <div class="ticket-head">
+              <div class="ticket-issuer">EE Cláudio Brandão · 2026</div>
+              <div class="ticket-event-name">Festa Junina</div>
+              <div class="ticket-meta">
+                <div class="tm-item">
+                  <div class="tm-label">Data</div>
+                  <div class="tm-val">27/06/2026</div>
+                </div>
+                <div class="tm-item">
+                  <div class="tm-label">Horário</div>
+                  <div class="tm-val">13h às 17h</div>
+                </div>
+                <div class="tm-item">
+                  <div class="tm-label">Local</div>
+                  <div class="tm-val">Av. Sen. Levindo Coelho, 632</div>
+                </div>
+                <div class="tm-item">
+                  <div class="tm-label">Tipo</div>
+                  <div class="tm-val">Acesso Geral</div>
+                </div>
+              </div>
+            </div>
+            <div class="ticket-foot">
+              <div style="text-align: left">
+                <div class="price-lbl">Valor único</div>
+                <div class="price-amount">R$15</div>
+                <div class="price-note">Limite: 1 por CPF</div>
+              </div>
+              <div class="qr-wrap">
+                <svg class="qr-svg" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 3H11V11H3V3ZM5 5V9H9V5H5Z" />
+                  <path d="M13 3H21V11H13V3ZM15 5V9H19V5H15Z" />
+                  <path d="M3 13H11V21H3V13ZM5 15V19H9V15H5Z" />
+                  <path d="M13 13H15V15H13V13Z" />
+                  <path d="M17 13H19V15H17V13Z" />
+                  <path d="M15 15H17V17H15V15Z" />
+                  <path d="M13 17H15V19H13V17Z" />
+                  <path d="M17 17H19V19H17V17Z" />
+                  <path d="M15 19H17V21H15V19Z" />
+                  <path d="M19 19H21V21H19V19Z" />
+                  <path d="M19 15H21V17H19V15Z" />
+                </svg>
+                <div class="qr-lbl">QR Code</div>
+              </div>
+            </div>
+            <div class="ticket-cta-wrap">
+              <button
+                class="ticket-cta"
+                onclick="window.parent.postMessage('open-cadastro', '*')"
+              >
+                Comprar ingresso — R$ 15,00
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMO FUNCIONA -->
+    <section id="como" class="section">
+      <div class="section-inner">
+        <p class="section-tag reveal">Passo a passo</p>
+        <h2 class="section-title reveal">Como funciona</h2>
+        <div class="steps reveal">
+          <div class="step">
+            <div class="step-n">01</div>
+            <div class="step-title">Crie sua conta</div>
+            <div class="step-desc">
+              Preencha seu nome, e-mail e dados do aluno. Leva menos de 2
+              minutos.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-n">02</div>
+            <div class="step-title">Escolha e pague</div>
+            <div class="step-desc">
+              Pague via PIX ou cartão de crédito com total segurança e rapidez.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-n">03</div>
+            <div class="step-title">Receba o QR Code</div>
+            <div class="step-desc">
+              Após aprovado, seu ingresso digital chega direto na caixa de
+              entrada.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-n">04</div>
+            <div class="step-title">Apresente na entrada</div>
+            <div class="step-desc">
+              No dia da festa, basta mostrar a tela do celular na portaria para
+              entrar.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="section" style="background: var(--bg2)">
+      <div class="section-inner">
+        <p class="section-tag reveal">Dúvidas</p>
+        <h2 class="section-title reveal">Perguntas frequentes</h2>
+        <div class="faq-list">
+          <div class="faq-item reveal">
+            <button class="faq-q" onclick="toggleFaq(this)">
+              Posso comprar mais de um ingresso?<span class="faq-icon">+</span>
+            </button>
+            <div class="faq-a">
+              Não. O sistema permite apenas 1 ingresso por CPF para garantir a
+              organização, o controle e a segurança total do evento.
+            </div>
+          </div>
+          <div class="faq-item reveal">
+            <button class="faq-q" onclick="toggleFaq(this)">
+              Como recebo meu ingresso?<span class="faq-icon">+</span>
+            </button>
+            <div class="faq-a">
+              Após a confirmação do pagamento (que é instantânea no PIX), você
+              recebe um e-mail com o ingresso digital contendo um QR Code
+              exclusivo.
+            </div>
+          </div>
+          <div class="faq-item reveal">
+            <button class="faq-q" onclick="toggleFaq(this)">
+              O que acontece se eu perder o e-mail?<span class="faq-icon"
+                >+</span
+              >
+            </button>
+            <div class="faq-a">
+              Fique tranquilo. Você pode acessar a área "Meus ingressos" no site
+              a qualquer hora, utilizando seu login, para visualizar e baixar o
+              QR Code novamente.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+      <p><strong>Escola Estadual Cláudio Brandão</strong></p>
+
+        <br>
+        <a href="#" onclick="openModal(); return false;" style="color: var(--ink2); text-decoration: underline; margin-top: 12px; display: inline-block; transition: color 0.2s;">Ler Termos de Uso e Política de Privacidade</a>
+      </p>
+    </footer>
+
+    <!-- MODAL TERMOS DE USO -->
+    <div id="termosModal" class="modal-overlay">
+      <div class="modal-content">
+        <button class="modal-close" onclick="closeModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+        <div class="modal-body">
+          <h3>Termos de Uso e Política de Privacidade</h3>
+          <p style="font-size: 12px; color: var(--ink3);">Última atualização: Junho de 2026</p>
+
+          <h4>1. Coleta e Uso de Dados</h4>
+          <p>Para a emissão do ingresso digital, coletamos dados básicos necessários (Nome completo, CPF e E-mail). Estas informações são utilizadas exclusivamente para o processamento da compra, controle de acesso na portaria, envio do ingresso e prevenção de fraudes, sempre em total conformidade com a Lei Geral de Proteção de Dados (LGPD).</p>
+
+          <h4>2. Pagamento e Segurança</h4>
+          <p>Todo o processo financeiro é gerido através de plataformas de pagamento (gateways) certificadas e homologadas pelo Banco Central do Brasil. A Escola Estadual Cláudio Brandão não tem acesso e nem armazena os dados do seu cartão de crédito.</p>
+
+          <h4>3. Regras do Ingresso</h4>
+          <ul>
+            <li>O sistema permite a compra de apenas <strong>1 (um) ingresso por CPF</strong> cadastrado.</li>
+            <li>O ingresso digital (QR Code) é pessoal, nominal e intransferível, devendo ser apresentado com um documento com foto na entrada do evento.</li>
+            <li>A entrada de menores de idade poderá estar sujeita a regras específicas definidas pela diretoria escolar.</li>
+          </ul>
+
+          <h4>4. Política de Cancelamento</h4>
+          <p>Solicitações de cancelamento e reembolso devem ser feitas entrando em contato diretamente com a secretaria da escola em até <strong>48 horas antes</strong> do início do evento. Após este período, devido aos custos de organização da festa, não será possível realizar estornos.</p>
+
+          <h4>5. Uso de Imagem</h4>
+          <p>A Festa Junina é um evento aberto à comunidade escolar. Ao ingressar no local, você compreende que fotos e vídeos poderão ser captados para fins de arquivo escolar, cobertura do evento e divulgação nos murais ou redes sociais oficiais da instituição.</p>
+
+          <h4>6. Contato e Suporte</h4>
+          <p>Em caso de dúvidas sobre este documento, sobre o processamento dos seus dados ou problemas na emissão do ingresso, entre em contato diretamente com a secretaria da escola de segunda a sexta-feira.</p>
+        </div>
+      </div>
+    </div>
+
+  <script>
+    // CONTADOR REGRESSIVO
+    const eventDate = new Date("2026-06-27T13:00:00");
+    function updateCountdown() {
+      const diff = eventDate - new Date();
+      if (diff <= 0) {
+        ["cd-d", "cd-h", "cd-m"].forEach(
+          (id) => (document.getElementById(id).textContent = "00")
+        );
+        return;
+      }
+      document.getElementById("cd-d").textContent = String(
+        Math.floor(diff / 86400000)
+      ).padStart(2, "0");
+      document.getElementById("cd-h").textContent = String(
+        Math.floor((diff % 86400000) / 3600000)
+      ).padStart(2, "0");
+      document.getElementById("cd-m").textContent = String(
+        Math.floor((diff % 3600000) / 60000)
+      ).padStart(2, "0");
+    }
+    updateCountdown();
+    setInterval(updateCountdown, 60000); // Atualiza a cada 1 minuto
+
+      // ANIMAÇÕES SCROLL
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) e.target.classList.add("visible");
+          });
+        },
+        { threshold: 0.1 }
+      );
+      document
+        .querySelectorAll(".reveal")
+        .forEach((el) => observer.observe(el));
+
+      // FAQ TOGGLE
+      function toggleFaq(btn) {
+        const item = btn.parentElement;
+        const wasOpen = item.classList.contains("open");
+        document
+          .querySelectorAll(".faq-item")
+          .forEach((i) => i.classList.remove("open"));
+        if (!wasOpen) item.classList.add("open");
+      }
+
+      // MODAL DE TERMOS DE USO
+      function openModal() {
+        document.getElementById('termosModal').classList.add('active');
+        document.body.style.overflow = 'hidden'; // Evita scroll da página atrás do modal
+      }
+
+      function closeModal() {
+        document.getElementById('termosModal').classList.remove('active');
+        document.body.style.overflow = ''; // Restaura o scroll
+      }
+
+      // Fecha o modal se o usuário clicar na área escura (overlay)
+      document.getElementById('termosModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+      });
+    </script>
+  </body>
+</html>
