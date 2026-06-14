@@ -50,6 +50,12 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
+// No topo do arquivo, adicione:
+import { initMercadoPago, CardPayment, Payment } from "@mercadopago/sdk-react";
+
+// Logo abaixo das constantes do Firebase, inicialize o MP:
+initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80");
+
 // Importando o nosso novo Dashboard separado
 import DashboardAdmin from "./DashboardAdmin";
 
@@ -569,49 +575,99 @@ export default function CadastroApp({ onBack = () => {} }) {
     setCardData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const executePayment = async () => {
-    if (
-      paymentMethod === "credit_card" &&
-      (cardData.number.length < 19 ||
-        cardData.name.length < 3 ||
-        cardData.expiry.length < 5 ||
-        cardData.cvv.length < 3)
-    )
-      return showToast("Dados do cartão inválidos.");
+const executePayment = async () => {
+  if (
+    paymentMethod === "credit_card" &&
+    (cardData.number.length < 19 ||
+      cardData.name.length < 3 ||
+      cardData.expiry.length < 5 ||
+      cardData.cvv.length < 3)
+  )
+    return showToast("Dados do cartão inválidos.");
 
-    setIsPaymentLoading(true);
+  setIsPaymentLoading(true);
 
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+  try {
+    let paymentApproved = false;
 
-      const newTickets = [];
-      if (cart.ingresso > 0) {
-        const uniqueCode = `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
+    if (paymentMethod === "credit_card") {
+      // Tokeniza o cartão via SDK do Mercado Pago
+      const mp = new window.MercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80");
+      
+      const [expMonth, expYear] = cardData.expiry.split("/");
+      const cardToken = await mp.createCardToken({
+        cardNumber: cardData.number.replace(/\s/g, ""),
+        cardholderName: cardData.name,
+        cardExpirationMonth: expMonth,
+        cardExpirationYear: "20" + expYear,
+        securityCode: cardData.cvv,
+        identificationType: "CPF",
+        identificationNumber: currentUser?.cpf?.replace(/\D/g, "") || "",
+      });
 
-        const ticketData = {
-          userId: currentUser.uid,
-          nomeAluno:
-            currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
-          type: "Acesso Geral",
-          qty: cart.ingresso,
-          price: 15,
-          code: uniqueCode,
-          criadoEm: new Date().toISOString(),
-        };
+      // Chama sua API ou Firebase Function com o token
+      // Por ora, aprovamos se o token foi gerado com sucesso (modo teste)
+      paymentApproved = !!cardToken?.id;
 
-        // Usamos setDoc para que o ID do documento seja o próprio código gerado
-        await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
-        newTickets.push({ id: uniqueCode, ...ticketData });
-      }
-
-      setPurchasedTickets((prev) => [...prev, ...newTickets]);
-      setIsPaymentLoading(false);
-      setView("success_purchase");
-    } catch (error) {
-      showToast("Erro ao processar o ingresso no banco de dados.");
-      setIsPaymentLoading(false);
+    } else if (paymentMethod === "pix") {
+      // Para PIX em teste, simula aprovação após gerar QR code real
+      const response = await fetch("https://api.mercadopago.com/v1/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer TEST-5215685526075469-061412-561d8834ac8728abeb405ed6e51195a3-380786826`,
+        },
+        body: JSON.stringify({
+          transaction_amount: totalCart,
+          payment_method_id: "pix",
+          payer: {
+            email: currentUser?.email || "test@test.com",
+            first_name: currentUser?.nomeResponsavel || "Test",
+            identification: {
+              type: "CPF",
+              number: currentUser?.cpf?.replace(/\D/g, "") || "00000000000",
+            },
+          },
+        }),
+      });
+      const pixData = await response.json();
+      paymentApproved = pixData.status === "pending"; // PIX começa como pending
     }
-  };
+
+    if (!paymentApproved) {
+      showToast("Pagamento não aprovado. Tente novamente.");
+      setIsPaymentLoading(false);
+      return;
+    }
+
+    // Salva o ingresso no Firestore normalmente
+    const newTickets = [];
+    if (cart.ingresso > 0) {
+      const uniqueCode = `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
+      const ticketData = {
+        userId: currentUser.uid,
+        nomeAluno: currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
+        type: "Acesso Geral",
+        qty: cart.ingresso,
+        price: 15,
+        code: uniqueCode,
+        criadoEm: new Date().toISOString(),
+        paymentMethod,
+      };
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      newTickets.push({ id: uniqueCode, ...ticketData });
+    }
+
+    setPurchasedTickets((prev) => [...prev, ...newTickets]);
+    setIsPaymentLoading(false);
+    setView("success_purchase");
+
+  } catch (error) {
+    console.error("Erro no pagamento:", error);
+    showToast("Erro ao processar pagamento.");
+    setIsPaymentLoading(false);
+  }
+};
 
   const anoLabel = { "1": "1º Ano", "2": "2º Ano", "3": "3º Ano" };
 
