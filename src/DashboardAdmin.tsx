@@ -31,7 +31,12 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
-import { IoMdInformationCircleOutline } from "react-icons/io";
+import {
+  IoMdInformationCircleOutline,
+  IoMdAddCircleOutline,
+} from "react-icons/io";
+import { IoEyeOutline } from "react-icons/io5";
+import { AiOutlineEyeInvisible } from "react-icons/ai";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -129,11 +134,12 @@ const Input = ({ className = "", error, ...props }) => (
 
 const Label = ({ children, className = "" }) => (
   <label
-    className={`text-[10px] font-bold uppercase tracking-widest text-zinc-500 ${className}`}
+    className={`text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5 block ${className}`}
   >
     {children}
   </label>
 );
+
 const StatCard = ({
   title,
   val,
@@ -200,6 +206,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [allTickets, setAllTickets] = useState([]);
   const [usersMap, setUsersMap] = useState({});
   const [adminLoading, setAdminLoading] = useState(false);
+
+  // Modais GERAIS
+  const [confirmLogoutModal, setConfirmLogoutModal] = useState(false);
+
+  // Scanner e Ingressos
   const [scanCode, setScanCode] = useState("");
   const [scanResultModal, setScanResultModal] = useState(null);
   const [infoModalTicket, setInfoModalTicket] = useState(null);
@@ -211,14 +222,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [filterYear, setFilterYear] = useState(null);
   const [filterClass, setFilterClass] = useState(null);
 
-  // ─── Estados: Pesquisar Ingressos ───
+  // Estados: Pesquisar Ingressos
   const [searchQuery, setSearchQuery] = useState("");
   const [searchYear, setSearchYear] = useState(null);
   const [searchClass, setSearchClass] = useState(null);
-  const [searchStatus, setSearchStatus] = useState(null); // null | "validado" | "pendente"
+  const [searchStatus, setSearchStatus] = useState(null);
   const [showSearchFilters, setShowSearchFilters] = useState(false);
 
-  // ─── Estados: Adicionar Ingresso ───
+  // Estados: Gestão de Lotes
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
+  const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
+
+  // Estados: Adicionar Ingresso
   const [addTicketForm, setAddTicketForm] = useState({
     nomeAluno: "",
     ano: "",
@@ -235,14 +252,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   useEffect(() => {
     allTicketsRef.current = allTickets;
   }, [allTickets]);
+
   useEffect(() => {
     if (!dashboardDetailModal) {
       setFilterYear(null);
       setFilterClass(null);
     }
   }, [dashboardDetailModal]);
+
   useEffect(() => {
-    fetchAllTicketsForAdmin();
+    if (activeTab === "admin_batches") {
+      fetchBatches();
+    } else {
+      fetchAllTicketsForAdmin();
+    }
   }, [activeTab]);
 
   const showToast = (message, type = "error") => {
@@ -250,6 +273,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // ─── FUNÇÃO: Buscar Todos os Ingressos ───
   const fetchAllTicketsForAdmin = async () => {
     setAdminLoading(true);
     try {
@@ -269,6 +293,96 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       showToast("Erro ao buscar dados.");
     }
     setAdminLoading(false);
+  };
+
+  // ─── FUNÇÃO: Buscar / Criar Lotes Iniciais ───
+  const fetchBatches = async () => {
+    setLoadingBatches(true);
+    try {
+      const snap = await getDocs(collection(db, "lotes"));
+      if (snap.empty) {
+        // Criação do lote padrão conforme requisito se a coleção não existir
+        const defaultBatch = {
+          nome: "Lote Padrão",
+          preco: 15,
+          quantidade: 15,
+          dataLimite: "", // Ilimitado/Sem data
+          publico: "Ambos",
+          visivel: true,
+        };
+        const docRef = doc(collection(db, "lotes"));
+        await setDoc(docRef, defaultBatch);
+        setBatches([{ id: docRef.id, ...defaultBatch }]);
+      } else {
+        const list = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        // Ordenação alfabética simples
+        setBatches(list.sort((a, b) => a.nome.localeCompare(b.nome)));
+      }
+    } catch (error) {
+      showToast("Erro ao buscar lotes.");
+    }
+    setLoadingBatches(false);
+  };
+
+  // ─── FUNÇÕES: Salvar Lote e Visibilidade ───
+  const handleSaveBatch = async (e) => {
+    e.preventDefault();
+    setLoadingBatches(true);
+    try {
+      const dataToSave = {
+        nome: batchModal.nome,
+        preco: Number(batchModal.preco),
+        quantidade: Number(batchModal.quantidade),
+        dataLimite: batchModal.dataLimite || "",
+        publico: batchModal.publico || "Ambos",
+        visivel: batchModal.visivel !== undefined ? batchModal.visivel : true,
+      };
+
+      if (batchModal.id) {
+        // Editando
+        await updateDoc(doc(db, "lotes", batchModal.id), dataToSave);
+        setBatches((prev) =>
+          prev.map((b) =>
+            b.id === batchModal.id ? { id: b.id, ...dataToSave } : b
+          )
+        );
+        showToast("Lote atualizado com sucesso!", "success");
+      } else {
+        // Criando Novo Lote
+        const newDocRef = doc(collection(db, "lotes"));
+        await setDoc(newDocRef, dataToSave);
+        setBatches((prev) => [...prev, { id: newDocRef.id, ...dataToSave }]);
+        showToast("Lote criado com sucesso!", "success");
+      }
+      setBatchModal(null);
+    } catch (error) {
+      showToast("Erro ao salvar o lote.");
+    }
+    setLoadingBatches(false);
+  };
+
+  const handleToggleVisibility = async () => {
+    if (!confirmVisibilityModal) return;
+    setLoadingBatches(true);
+    try {
+      const batch = confirmVisibilityModal;
+      const novoStatus = !batch.visivel;
+      await updateDoc(doc(db, "lotes", batch.id), { visivel: novoStatus });
+      setBatches((prev) =>
+        prev.map((b) => (b.id === batch.id ? { ...b, visivel: novoStatus } : b))
+      );
+      showToast(
+        novoStatus
+          ? "Lote visível para o público."
+          : "Lote ocultado com sucesso.",
+        "success"
+      );
+      setConfirmVisibilityModal(null);
+    } catch (error) {
+      showToast("Erro ao alterar a visibilidade.");
+    }
+    setLoadingBatches(false);
   };
 
   const processScan = (code) => {
@@ -412,7 +526,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         turma: addTicketForm.turma,
         type: "Acesso Geral",
         qty: 1,
-        price: 15,
+        price: 15, // Pode ser ajustado conforme a criação manual ou lógica de lote.
         code: uniqueCode,
         criadoEm: agora,
         usado,
@@ -567,7 +681,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         key={t.id}
         className="bg-[#0a0a0a] border border-zinc-800 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-4 hover:border-zinc-700 hover:bg-[#0c0c0c] transition-colors"
       >
-        {/* Ícone + identidade */}
         <div className="flex items-center gap-4 min-w-0 flex-1">
           <div className="w-11 h-11 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center justify-center shrink-0">
             <User className="h-5 w-5" />
@@ -593,7 +706,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           </div>
         </div>
 
-        {/* Status + ação */}
         <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-5 pl-[60px] sm:pl-0 shrink-0">
           <div className="flex flex-col items-start sm:items-end gap-1">
             <span
@@ -697,6 +809,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               label: "Adicionar Ingresso",
               icon: UserPlus,
             },
+            {
+              key: "admin_batches",
+              label: "Gestão de Lotes",
+              icon: IoMdAddCircleOutline,
+            },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -723,7 +840,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         </nav>
         <div className="p-4 border-t border-zinc-800 shrink-0 space-y-2">
           <button
-            onClick={onBack || onLogout}
+            onClick={onBack || (() => setConfirmLogoutModal(true))}
             className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center h-12 rounded-xl text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all whitespace-nowrap ${
               sidebarOpen ? "lg:px-3 lg:justify-start" : ""
             }`}
@@ -738,7 +855,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             </span>
           </button>
           <button
-            onClick={onLogout}
+            onClick={() => setConfirmLogoutModal(true)}
             className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center h-12 rounded-xl text-sm font-medium text-zinc-500 hover:bg-zinc-900 hover:text-red-400 transition-all whitespace-nowrap ${
               sidebarOpen ? "lg:px-3 lg:justify-start" : ""
             }`}
@@ -749,7 +866,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 sidebarOpen ? "opacity-100 block" : "lg:hidden opacity-0 w-0"
               }
             >
-              Sair
+              Sair da conta
             </span>
           </button>
         </div>
@@ -779,6 +896,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 ? "Adicionar Ingresso"
                 : activeTab === "admin_search"
                 ? "Pesquisar Ingressos"
+                : activeTab === "admin_batches"
+                ? "Gestão de Lotes"
                 : "Listas de Presença"}
             </h2>
           </div>
@@ -1176,7 +1295,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 </button>
               </div>
 
-              {/* Filtros */}
               {showSearchFilters && (
                 <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="flex items-center justify-between">
@@ -1303,7 +1421,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 </div>
               )}
 
-              {/* Resultados */}
               <div className="space-y-3">
                 {searchQuery.trim().length > 0 &&
                 searchQuery.trim().length < 3 ? (
@@ -1543,10 +1660,349 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               )}
             </div>
           )}
+
+          {/* ── GESTÃO DE LOTES ── */}
+          {activeTab === "admin_batches" && (
+            <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                    <IoMdAddCircleOutline className="h-6 w-6 text-white" />{" "}
+                    Gestão de Lotes
+                  </h1>
+                  <p className="text-zinc-400 text-sm mt-1">
+                    Crie e edite lotes de ingressos. Gerencie preços e
+                    visibilidade.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Button
+                    variant="outline"
+                    onClick={fetchBatches}
+                    isLoading={loadingBatches}
+                    className="flex-1 sm:flex-none"
+                  >
+                    Atualizar
+                  </Button>
+                  <Button
+                    className="flex-1 sm:flex-none"
+                    onClick={() =>
+                      setBatchModal({
+                        nome: "",
+                        preco: "",
+                        quantidade: "",
+                        dataLimite: "",
+                        publico: "Ambos",
+                      })
+                    }
+                  >
+                    <IoMdAddCircleOutline className="w-5 h-5 mr-1" /> Criar Lote
+                  </Button>
+                </div>
+              </div>
+
+              {loadingBatches && batches.length === 0 ? (
+                <div className="py-12 flex justify-center">
+                  <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {batches.map((batch) => (
+                    <div
+                      key={batch.id}
+                      className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl relative flex flex-col gap-4 hover:border-zinc-700 transition-colors"
+                    >
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <h3 className="text-white font-bold text-lg leading-tight mb-2">
+                            {batch.nome}
+                          </h3>
+                          <span
+                            className={`inline-flex px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest ${
+                              batch.visivel
+                                ? "bg-green-500/10 text-green-400"
+                                : "bg-red-500/10 text-red-400"
+                            }`}
+                          >
+                            {batch.visivel
+                              ? "Ativo / Visível"
+                              : "Inativo / Oculto"}
+                          </span>
+                        </div>
+                        <p className="text-2xl font-black text-white shrink-0">
+                          R$ {Number(batch.preco).toFixed(2).replace(".", ",")}
+                        </p>
+                      </div>
+
+                      <div className="text-sm text-zinc-400 space-y-2 mt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-zinc-500">
+                            Quantidade:
+                          </span>
+                          <span className="text-white font-mono">
+                            {batch.quantidade} Ingressos
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-zinc-500">
+                            Público-alvo:
+                          </span>
+                          <span className="text-white font-medium">
+                            {batch.publico || "Ambos"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-zinc-500">
+                            Data Limite:
+                          </span>
+                          <span className="text-white font-medium text-xs">
+                            {batch.dataLimite
+                              ? formatDate(batch.dataLimite)
+                              : "Ilimitado"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-auto pt-4 border-t border-zinc-800 flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-10 px-4 text-xs"
+                          onClick={() => setBatchModal(batch)}
+                        >
+                          Editar Lote
+                        </Button>
+                        <button
+                          onClick={() => setConfirmVisibilityModal(batch)}
+                          className={`h-10 w-10 flex items-center justify-center rounded-xl border transition-colors ${
+                            batch.visivel
+                              ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"
+                              : "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20"
+                          }`}
+                          title={
+                            batch.visivel ? "Ocultar Lote" : "Tornar Visível"
+                          }
+                        >
+                          {batch.visivel ? (
+                            <IoEyeOutline size={18} />
+                          ) : (
+                            <AiOutlineEyeInvisible size={18} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
 
-      {/* ── MODAIS ── */}
+      {/* ── MODAIS GLOBAIS ── */}
+
+      {/* Modal de Confirmação de Logout */}
+      {confirmLogoutModal && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all animate-in fade-in"
+          onClick={() => setConfirmLogoutModal(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-5">
+              <LogOut className="h-8 w-8" />
+            </div>
+            <h4 className="text-white font-bold text-xl mb-2">
+              Sair da conta?
+            </h4>
+            <p className="text-zinc-500 text-sm mb-6">
+              Tem certeza que deseja encerrar sua sessão?
+            </p>
+            <div className="flex gap-3 w-full">
+              <Button
+                variant="outline"
+                className="flex-1 h-11"
+                onClick={() => setConfirmLogoutModal(false)}
+              >
+                Cancelar
+              </Button>
+              <button
+                onClick={onLogout}
+                className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors"
+              >
+                Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Criação / Edição de Lote */}
+      {batchModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
+          onClick={() => setBatchModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-lg relative shadow-2xl flex flex-col animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 sm:p-8 border-b border-zinc-800 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <IoMdAddCircleOutline className="w-6 h-6" />
+                {batchModal.id ? "Editar Lote" : "Novo Lote"}
+              </h3>
+              <button
+                onClick={() => setBatchModal(null)}
+                className="text-zinc-500 hover:text-white bg-zinc-900 p-2 rounded-full transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveBatch} className="p-6 sm:p-8 space-y-5">
+              <div>
+                <Label>Nome do lote</Label>
+                <Input
+                  required
+                  value={batchModal.nome || ""}
+                  onChange={(e) =>
+                    setBatchModal({ ...batchModal, nome: e.target.value })
+                  }
+                  placeholder="Ex: Lote 1 - Antecipado"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Preço (R$)</Label>
+                  <Input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={batchModal.preco || ""}
+                    onChange={(e) =>
+                      setBatchModal({ ...batchModal, preco: e.target.value })
+                    }
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <Label>Quantidade Limite</Label>
+                  <Input
+                    required
+                    type="number"
+                    min="1"
+                    value={batchModal.quantidade || ""}
+                    onChange={(e) =>
+                      setBatchModal({
+                        ...batchModal,
+                        quantidade: e.target.value,
+                      })
+                    }
+                    placeholder="Qtd."
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Data e Horário Limite (Opcional)</Label>
+                <Input
+                  type="datetime-local"
+                  value={batchModal.dataLimite || ""}
+                  onChange={(e) =>
+                    setBatchModal({ ...batchModal, dataLimite: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Público-alvo</Label>
+                <select
+                  required
+                  value={batchModal.publico || "Ambos"}
+                  onChange={(e) =>
+                    setBatchModal({ ...batchModal, publico: e.target.value })
+                  }
+                  className="flex h-12 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-white transition-all"
+                >
+                  <option value="Alunos">Apenas Alunos</option>
+                  <option value="Pais/Responsáveis">Pais / Responsáveis</option>
+                  <option value="Ambos">Ambos (Todos)</option>
+                </select>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 h-12"
+                  onClick={() => setBatchModal(null)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  className="flex-1 h-12"
+                  isLoading={loadingBatches}
+                >
+                  Salvar Lote
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Visibilidade do Lote */}
+      {confirmVisibilityModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
+          onClick={() => setConfirmVisibilityModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center justify-center mb-5">
+              {confirmVisibilityModal.visivel ? (
+                <AiOutlineEyeInvisible className="h-8 w-8 text-zinc-400" />
+              ) : (
+                <IoEyeOutline className="h-8 w-8 text-white" />
+              )}
+            </div>
+            <h4 className="text-white font-bold text-lg mb-2">
+              {confirmVisibilityModal.visivel
+                ? "Deseja ocultar este lote?"
+                : "Deseja tornar este lote visível novamente?"}
+            </h4>
+            <p className="text-zinc-500 text-sm mb-6">
+              {confirmVisibilityModal.visivel
+                ? "Ele deixará de aparecer para compra, mas ainda poderá ser editado no painel."
+                : "Ele voltará a ficar disponível para compra pelo público."}
+            </p>
+            <div className="flex gap-3 w-full">
+              <Button
+                variant="outline"
+                className="flex-1 h-11"
+                onClick={() => setConfirmVisibilityModal(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className={`flex-1 h-11 border-none ${
+                  confirmVisibilityModal.visivel
+                    ? "bg-red-500 hover:bg-red-600 text-white"
+                    : "bg-white hover:bg-zinc-200 text-black"
+                }`}
+                isLoading={loadingBatches}
+                onClick={handleToggleVisibility}
+              >
+                Confirmar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Outros Modais Existentes (Scanner, Detalhes, Dashboard, Excluir) */}
       {scanResultModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
@@ -1948,7 +2404,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[60]">
+        <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
           <AlertCircle className="h-5 w-5" />
           {toast.message}
         </div>
