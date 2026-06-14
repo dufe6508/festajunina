@@ -552,9 +552,33 @@ export default function CadastroApp({ onBack = () => {} }) {
     });
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (totalCart === 0) return showToast("Adicione itens ao carrinho.");
-    setView("payment");
+    setIsPaymentLoading(true);
+    try {
+      const res = await fetch("/api/create-preference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          totalCart,
+          userEmail: currentUser?.email,
+          userName: currentUser?.nomeResponsavel,
+          userCpf: currentUser?.cpf,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.preferenceId) {
+        showToast("Erro ao iniciar pagamento. Tente novamente.");
+        setIsPaymentLoading(false);
+        return;
+      }
+      setMpPreferenceId(data.preferenceId);
+      setView("payment");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro de conexão. Tente novamente.");
+    }
+    setIsPaymentLoading(false);
   };
 
   const handleCardChange = (e) => {
@@ -1496,12 +1520,15 @@ export default function CadastroApp({ onBack = () => {} }) {
                       <Button
                         className="w-full h-14"
                         onClick={handleCheckout}
+                        isLoading={isPaymentLoading}
                         disabled={
-                          totalCart === 0 || purchasedTickets.length > 0
+                          totalCart === 0 || purchasedTickets.length > 0 || isPaymentLoading
                         }
                       >
                         {purchasedTickets.length > 0
                           ? "Limite Atingido"
+                          : isPaymentLoading
+                          ? "Carregando..."
                           : "Continuar"}
                       </Button>
                     </div>
@@ -1790,21 +1817,8 @@ export default function CadastroApp({ onBack = () => {} }) {
             </div>
 
             {/* Payment Brick — checkout transparente (PIX, cartão, boleto) */}
-            {!mpPreferenceId ? (
-              <Button
-                className="w-full h-14"
-                onClick={executePayment}
-                isLoading={isPaymentLoading}
-              >
-                <CreditCard className="h-5 w-5" />
-                {isPaymentLoading ? "Carregando..." : "Escolher forma de pagamento"}
-              </Button>
-            ) : (
+            {mpPreferenceId ? (
               <div>
-                <p className="text-xs text-zinc-500 text-center mb-4">
-                  Pague com PIX, cartão de crédito ou boleto:
-                </p>
-                {/* Payment Brick — renderiza diretamente sem redirecionar para conta MP */}
                 <Payment
                   initialization={{
                     amount: totalCart,
@@ -1843,12 +1857,11 @@ export default function CadastroApp({ onBack = () => {} }) {
                     setMpPreferenceId(null);
                   }}
                 />
-                <button
-                  onClick={() => setMpPreferenceId(null)}
-                  className="w-full mt-3 text-xs text-zinc-600 hover:text-zinc-400 transition"
-                >
-                  Cancelar
-                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+                <span className="ml-3 text-zinc-500 text-sm">Carregando formas de pagamento...</span>
               </div>
             )}
 
