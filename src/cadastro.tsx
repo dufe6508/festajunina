@@ -52,7 +52,9 @@ import {
 
 import { initMercadoPago, Payment } from "@mercadopago/sdk-react";
 
-initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80", { locale: "pt-BR" });
+initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80", {
+  locale: "pt-BR",
+});
 
 // Importando o nosso novo Dashboard separado
 import DashboardAdmin from "./DashboardAdmin";
@@ -176,6 +178,20 @@ const Button = ({
   );
 };
 
+// Formatação de data extraída dos Lotes
+const formatDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })} às ${d.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+};
+
 /* ─── App Principal ─── */
 export default function CadastroApp({ onBack = () => {} }) {
   const [view, setView] = useState("loading");
@@ -202,7 +218,19 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
 
-  const [cart, setCart] = useState({ ingresso: 0 });
+  // Estados dos Lotes Visíveis
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+
+  // Carrinho refatorado para suportar Lotes por ID
+  // Formato: { [batchId]: { qty: number, nome: string, preco: number } }
+  const [cart, setCart] = useState({});
+  const cartItems = Object.values(cart);
+  const totalCart = cartItems.reduce(
+    (acc, item) => acc + item.qty * item.preco,
+    0
+  );
+
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("pix");
   const [cardData, setCardData] = useState({
@@ -214,8 +242,6 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   const [purchasedTickets, setPurchasedTickets] = useState([]);
   const [selectedQr, setSelectedQr] = useState(null);
-  const prices = { ingresso: 15 };
-  const totalCart = cart.ingresso * prices.ingresso;
 
   // 1. Ouvinte de Autenticação do Firebase e Persistência de Login
   useEffect(() => {
@@ -282,6 +308,33 @@ export default function CadastroApp({ onBack = () => {} }) {
 
     return () => unsubscribe();
   }, []);
+
+  // Busca de Lotes Dinâmicos quando acessa a Loja
+  useEffect(() => {
+    if (activeTab === "loja") {
+      fetchBatches();
+    }
+  }, [activeTab]);
+
+  const fetchBatches = async () => {
+    setLoadingBatches(true);
+    try {
+      const snap = await getDocs(collection(db, "lotes"));
+      const list = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        // Exibe Apenas os Lotes que estão Visíveis
+        if (data.visivel) {
+          list.push({ id: docSnap.id, ...data });
+        }
+      });
+      // Ordenação simples por nome
+      setBatches(list.sort((a, b) => a.nome.localeCompare(b.nome)));
+    } catch (err) {
+      showToast("Erro ao carregar lotes disponíveis.");
+    }
+    setLoadingBatches(false);
+  };
 
   const showToast = (message, type = "error") => {
     setToast({ message, type });
@@ -534,21 +587,39 @@ export default function CadastroApp({ onBack = () => {} }) {
     } else {
       await signOut(auth);
     }
-    setCart({ ingresso: 0 });
+    setCart({});
   };
 
-  // Validação de Limite de Carrinho
-  const updateCart = (item, amount) => {
+  // Validação de Limite de Carrinho com Suporte aos Lotes Dinâmicos
+  const updateCart = (batch, amount) => {
     if (purchasedTickets.length > 0) {
-      return showToast("Permitido apenas um ingresso por pessoa.");
+      return showToast("Você já garantiu seu ingresso. Limite de 1 por CPF.");
     }
     setCart((prev) => {
-      const newVal = Math.max(0, prev[item] + amount);
-      if (newVal > 1) {
-        showToast("Permitido apenas um ingresso por pessoa.");
-        return { ...prev, [item]: 1 };
+      const currentQty = prev[batch.id]?.qty || 0;
+      const newQty = Math.max(0, currentQty + amount);
+
+      // Limita compras de todos os lotes somados a 1
+      const otherItemsCount = Object.entries(prev)
+        .filter(([id]) => id !== batch.id)
+        .reduce((acc, [, item]) => acc + item.qty, 0);
+
+      if (otherItemsCount + newQty > 1) {
+        showToast("Permitido apenas um ingresso por pessoa no total.");
+        return prev;
       }
-      return { ...prev, [item]: newVal };
+
+      const newCart = { ...prev };
+      if (newQty === 0) {
+        delete newCart[batch.id];
+      } else {
+        newCart[batch.id] = {
+          qty: newQty,
+          preco: Number(batch.preco),
+          nome: batch.nome,
+        };
+      }
+      return newCart;
     });
   };
 
@@ -601,58 +672,45 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [pixData, setPixData] = useState(null); // { qrCode, qrCodeBase64, paymentId }
   const [pixCopied, setPixCopied] = useState(false);
 
-  // Cria a preferência no Mercado Pago via Vercel Function
-  const executePayment = async () => {
-    if (totalCart === 0) return showToast("Carrinho vazio.");
-    setIsPaymentLoading(true);
-    try {
-      const res = await fetch("/api/create-preference", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          totalCart,
-          userEmail: currentUser?.email,
-          userName: currentUser?.nomeResponsavel,
-          userCpf: currentUser?.cpf,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.preferenceId) {
-        showToast("Erro ao iniciar pagamento. Tente novamente.");
-        setIsPaymentLoading(false);
-        return;
-      }
-      setMpPreferenceId(data.preferenceId);
-    } catch (err) {
-      console.error(err);
-      showToast("Erro de conexão. Tente novamente.");
-    }
-    setIsPaymentLoading(false);
-  };
-
   // Chamado pelo Wallet do MP quando pagamento é aprovado/pendente
   const handleMpSuccess = async (paymentData) => {
     try {
       const uniqueCode = `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      // Resgata o nome do lote que estava no carrinho
+      const cartValues = Object.values(cart);
+      const purchasedItem = cartValues[0] || {
+        nome: "Acesso Geral",
+        preco: 15,
+        qty: 1,
+      };
+
       const ticketData = {
         userId: currentUser.uid,
-        nomeAluno: currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
-        type: "Acesso Geral",
-        qty: cart.ingresso,
-        price: 15,
+        nomeAluno:
+          currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
+        type: purchasedItem.nome, // Salva o nome do lote escolhido
+        qty: purchasedItem.qty,
+        price: purchasedItem.preco,
         code: uniqueCode,
         criadoEm: new Date().toISOString(),
         paymentMethod: "mercadopago",
         mpPaymentId: paymentData?.paymentId || "",
       };
+
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
-      setPurchasedTickets((prev) => [...prev, { id: uniqueCode, ...ticketData }]);
+      setPurchasedTickets((prev) => [
+        ...prev,
+        { id: uniqueCode, ...ticketData },
+      ]);
       setMpPreferenceId(null);
-      setCart({ ingresso: 0 });
+      setCart({});
       setView("success_purchase");
     } catch (err) {
       console.error(err);
-      showToast("Pagamento recebido, mas erro ao salvar ingresso. Contate o suporte.");
+      showToast(
+        "Pagamento recebido, mas erro ao salvar ingresso. Contate o suporte."
+      );
     }
   };
 
@@ -1385,7 +1443,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                           className="w-full"
                           onClick={() => setActiveTab("loja")}
                         >
-                          Comprar Agora — R$ 15
+                          Ver Lotes Disponíveis
                         </Button>
                       </div>
                     )}
@@ -1439,53 +1497,77 @@ export default function CadastroApp({ onBack = () => {} }) {
               <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
                 <div className="grid lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-[#0a0a0a] p-6 sm:p-8 rounded-3xl border border-zinc-800 flex flex-col sm:flex-row justify-between gap-6">
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-bold text-xl text-white">
-                            Ingresso Único
-                          </h3>
-                          <span className="text-[10px] font-bold uppercase tracking-wider bg-white text-black px-2 py-0.5 rounded-full">
-                            Geral
-                          </span>
-                        </div>
-                        <p className="text-sm text-zinc-400">
-                          Acesso garantido ao evento. Apresentação obrigatória
-                          na portaria.
-                        </p>
-                        <p className="text-white font-black text-2xl mt-4">
-                          R$ 15,00
-                        </p>
-
-                        {purchasedTickets.length > 0 && (
-                          <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
-                            <CheckCircle2 className="h-5 w-5 shrink-0" />
-                            Você já garantiu sua entrada. Permitido um ingresso
-                            por CPF.
-                          </div>
-                        )}
+                    {loadingBatches ? (
+                      <div className="py-12 flex justify-center">
+                        <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
                       </div>
+                    ) : batches.length === 0 ? (
+                      <div className="bg-[#0a0a0a] p-8 rounded-3xl border border-zinc-800 text-center text-zinc-500">
+                        Nenhum lote disponível no momento.
+                      </div>
+                    ) : (
+                      batches.map((batch) => {
+                        const qtyInCart = cart[batch.id]?.qty || 0;
+                        return (
+                          <div
+                            key={batch.id}
+                            className="bg-[#0a0a0a] p-6 sm:p-8 rounded-3xl border border-zinc-800 flex flex-col sm:flex-row justify-between gap-6"
+                          >
+                            <div>
+                              <div className="flex items-center gap-3 mb-2">
+                                <h3 className="font-bold text-xl text-white">
+                                  {batch.nome}
+                                </h3>
+                                <span className="text-[10px] font-bold uppercase tracking-wider bg-white text-black px-2 py-0.5 rounded-full">
+                                  Lote
+                                </span>
+                              </div>
+                              <p className="text-sm text-zinc-400">
+                                Acesso garantido ao evento.
+                                {batch.dataLimite &&
+                                  ` Disponível até ${formatDate(
+                                    batch.dataLimite
+                                  )}`}
+                              </p>
+                              <p className="text-white font-black text-2xl mt-4">
+                                R${" "}
+                                {Number(batch.preco)
+                                  .toFixed(2)
+                                  .replace(".", ",")}
+                              </p>
 
-                      {purchasedTickets.length === 0 && (
-                        <div className="flex items-center gap-3 self-start sm:self-center bg-black border border-zinc-800 rounded-xl p-1.5 mt-4 sm:mt-0">
-                          <button
-                            onClick={() => updateCart("ingresso", -1)}
-                            className="p-3 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white transition"
-                          >
-                            <Minus className="h-4 w-4" />
-                          </button>
-                          <span className="w-8 text-center font-bold text-white text-lg">
-                            {cart.ingresso}
-                          </span>
-                          <button
-                            onClick={() => updateCart("ingresso", 1)}
-                            className="p-3 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white transition"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                              {purchasedTickets.length > 0 && (
+                                <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
+                                  <CheckCircle2 className="h-5 w-5 shrink-0" />
+                                  Você já garantiu sua entrada. Limite de 1
+                                  ingresso por CPF.
+                                </div>
+                              )}
+                            </div>
+
+                            {purchasedTickets.length === 0 && (
+                              <div className="flex items-center gap-3 self-start sm:self-center bg-black border border-zinc-800 rounded-xl p-1.5 mt-4 sm:mt-0">
+                                <button
+                                  onClick={() => updateCart(batch, -1)}
+                                  className="p-3 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white transition"
+                                >
+                                  <Minus className="h-4 w-4" />
+                                </button>
+                                <span className="w-8 text-center font-bold text-white text-lg">
+                                  {qtyInCart}
+                                </span>
+                                <button
+                                  onClick={() => updateCart(batch, 1)}
+                                  className="p-3 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white transition"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
 
                   {/* Resumo */}
@@ -1496,18 +1578,24 @@ export default function CadastroApp({ onBack = () => {} }) {
                         Resumo
                       </h3>
                       <div className="space-y-4 text-sm mb-6">
-                        {cart.ingresso > 0 && (
-                          <div className="flex justify-between text-zinc-300">
-                            <span>{cart.ingresso}× Ingresso</span>
-                            <span className="font-semibold text-white">
-                              R${" "}
-                              {(cart.ingresso * 15)
-                                .toFixed(2)
-                                .replace(".", ",")}
-                            </span>
-                          </div>
-                        )}
-                        {totalCart === 0 && (
+                        {cartItems.length > 0 ? (
+                          cartItems.map((item, idx) => (
+                            <div
+                              key={idx}
+                              className="flex justify-between text-zinc-300"
+                            >
+                              <span>
+                                {item.qty}× {item.nome}
+                              </span>
+                              <span className="font-semibold text-white">
+                                R${" "}
+                                {(item.qty * item.preco)
+                                  .toFixed(2)
+                                  .replace(".", ",")}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
                           <div className="py-8 text-center text-zinc-500 bg-black rounded-xl border border-dashed border-zinc-800 text-sm">
                             Carrinho vazio
                           </div>
@@ -1524,7 +1612,9 @@ export default function CadastroApp({ onBack = () => {} }) {
                         onClick={handleCheckout}
                         isLoading={isPaymentLoading}
                         disabled={
-                          totalCart === 0 || purchasedTickets.length > 0 || isPaymentLoading
+                          totalCart === 0 ||
+                          purchasedTickets.length > 0 ||
+                          isPaymentLoading
                         }
                       >
                         {purchasedTickets.length > 0
@@ -1785,7 +1875,10 @@ export default function CadastroApp({ onBack = () => {} }) {
           {/* Header */}
           <div className="bg-[#0a0a0a] p-6 border-b border-zinc-800 flex items-center gap-4">
             <button
-              onClick={() => { setView("dashboard"); setMpPreferenceId(null); }}
+              onClick={() => {
+                setView("dashboard");
+                setMpPreferenceId(null);
+              }}
               className="p-2 hover:bg-zinc-900 text-zinc-400 hover:text-white rounded-full transition"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -1802,21 +1895,30 @@ export default function CadastroApp({ onBack = () => {} }) {
           </div>
 
           <div className="p-6 sm:p-8 space-y-6">
-            {/* Resumo do pedido */}
-            <div className="bg-black rounded-2xl border border-zinc-800 p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center">
-                  <TicketIcon className="h-5 w-5 text-white" />
+            {/* Resumo do pedido modificado para suportar carrinho dinâmico */}
+            {cartItems.map((item, idx) => (
+              <div
+                key={idx}
+                className="bg-black rounded-2xl border border-zinc-800 p-4 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center shrink-0">
+                    <TicketIcon className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {item.nome}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      Festa Junina Brandão
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">Ingresso – Acesso Geral</p>
-                  <p className="text-xs text-zinc-500">Festa Junina Brandão</p>
-                </div>
+                <span className="text-white font-bold">
+                  R$ {(item.qty * item.preco).toFixed(2).replace(".", ",")}
+                </span>
               </div>
-              <span className="text-white font-bold">
-                R$ {totalCart.toFixed(2).replace(".", ",")}
-              </span>
-            </div>
+            ))}
 
             {/* Payment Brick — checkout transparente (PIX, cartão, boleto) */}
             {pixData ? (
@@ -1837,14 +1939,18 @@ export default function CadastroApp({ onBack = () => {} }) {
                       />
                     ) : (
                       <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixData.qrCode)}`}
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                          pixData.qrCode
+                        )}`}
                         alt="QR Code PIX"
                         className="w-48 h-48 object-contain"
                       />
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-zinc-400 text-center">Escaneie o código com seu banco</p>
+                <p className="text-xs text-zinc-400 text-center">
+                  Escaneie o código com seu banco
+                </p>
                 {/* Código copia e cola */}
                 <div className="flex gap-2">
                   <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-400 font-mono truncate">
@@ -1858,18 +1964,27 @@ export default function CadastroApp({ onBack = () => {} }) {
                     }}
                     className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 flex items-center justify-center text-zinc-400 hover:text-white transition"
                   >
-                    {pixCopied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                    {pixCopied ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
                 {/* Confirmar pagamento */}
                 <Button
                   className="w-full h-14"
-                  onClick={() => handleMpSuccess({ paymentId: pixData.paymentId })}
+                  onClick={() =>
+                    handleMpSuccess({ paymentId: pixData.paymentId })
+                  }
                 >
                   <CheckCircle2 className="h-5 w-5" /> Confirmar Pagamento
                 </Button>
                 <button
-                  onClick={() => { setPixData(null); setMpPreferenceId(null); }}
+                  onClick={() => {
+                    setPixData(null);
+                    setMpPreferenceId(null);
+                  }}
                   className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition"
                 >
                   Cancelar
@@ -1891,7 +2006,10 @@ export default function CadastroApp({ onBack = () => {} }) {
                       mercadoPago: "wallet_purchase",
                     },
                   }}
-                  onSubmit={async ({ selectedPaymentMethod, formData: mpFormData }) => {
+                  onSubmit={async ({
+                    selectedPaymentMethod,
+                    formData: mpFormData,
+                  }) => {
                     try {
                       const res = await fetch("/api/process-payment", {
                         method: "POST",
@@ -1900,8 +2018,12 @@ export default function CadastroApp({ onBack = () => {} }) {
                       });
                       const result = await res.json();
                       // PIX — mostra QR code na tela
-                      if (result.payment_method_id === "pix" && result.point_of_interaction?.transaction_data) {
-                        const txData = result.point_of_interaction.transaction_data;
+                      if (
+                        result.payment_method_id === "pix" &&
+                        result.point_of_interaction?.transaction_data
+                      ) {
+                        const txData =
+                          result.point_of_interaction.transaction_data;
                         setPixData({
                           qrCode: txData.qr_code,
                           qrCodeBase64: txData.qr_code_base64,
@@ -1930,7 +2052,9 @@ export default function CadastroApp({ onBack = () => {} }) {
             ) : (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
-                <span className="ml-3 text-zinc-500 text-sm">Carregando formas de pagamento...</span>
+                <span className="ml-3 text-zinc-500 text-sm">
+                  Carregando formas de pagamento...
+                </span>
               </div>
             )}
 
@@ -1990,7 +2114,7 @@ export default function CadastroApp({ onBack = () => {} }) {
             <Button
               className="w-full h-14"
               onClick={() => {
-                setCart({ ingresso: 0 });
+                setCart({});
                 setActiveTab("ingressos");
                 setView("dashboard");
               }}
@@ -2001,7 +2125,7 @@ export default function CadastroApp({ onBack = () => {} }) {
               variant="ghost"
               className="w-full h-14"
               onClick={() => {
-                setCart({ ingresso: 0 });
+                setCart({});
                 setActiveTab("inicio");
                 setView("dashboard");
               }}
