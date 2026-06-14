@@ -598,6 +598,8 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
   const [mpPreferenceId, setMpPreferenceId] = useState(null);
+  const [pixData, setPixData] = useState(null); // { qrCode, qrCodeBase64, paymentId }
+  const [pixCopied, setPixCopied] = useState(false);
 
   // Cria a preferência no Mercado Pago via Vercel Function
   const executePayment = async () => {
@@ -1817,7 +1819,63 @@ export default function CadastroApp({ onBack = () => {} }) {
             </div>
 
             {/* Payment Brick — checkout transparente (PIX, cartão, boleto) */}
-            {mpPreferenceId ? (
+            {pixData ? (
+              <div className="space-y-4">
+                <div className="flex gap-2 border-b border-zinc-800 pb-4 mb-2">
+                  <div className="flex-1 bg-white text-black rounded-xl py-2 text-center text-sm font-bold flex items-center justify-center gap-2">
+                    <MdQrCode2 className="w-5 h-5" /> PIX
+                  </div>
+                </div>
+                {/* QR Code */}
+                <div className="flex justify-center">
+                  <div className="bg-white p-4 rounded-2xl">
+                    {pixData.qrCodeBase64 ? (
+                      <img
+                        src={`data:image/png;base64,${pixData.qrCodeBase64}`}
+                        alt="QR Code PIX"
+                        className="w-48 h-48 object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixData.qrCode)}`}
+                        alt="QR Code PIX"
+                        className="w-48 h-48 object-contain"
+                      />
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-zinc-400 text-center">Escaneie o código com seu banco</p>
+                {/* Código copia e cola */}
+                <div className="flex gap-2">
+                  <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-400 font-mono truncate">
+                    {pixData.qrCode?.slice(0, 40)}...
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(pixData.qrCode);
+                      setPixCopied(true);
+                      setTimeout(() => setPixCopied(false), 2000);
+                    }}
+                    className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 flex items-center justify-center text-zinc-400 hover:text-white transition"
+                  >
+                    {pixCopied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+                {/* Confirmar pagamento */}
+                <Button
+                  className="w-full h-14"
+                  onClick={() => handleMpSuccess({ paymentId: pixData.paymentId })}
+                >
+                  <CheckCircle2 className="h-5 w-5" /> Confirmar Pagamento
+                </Button>
+                <button
+                  onClick={() => { setPixData(null); setMpPreferenceId(null); }}
+                  className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : mpPreferenceId ? (
               <div>
                 <Payment
                   initialization={{
@@ -1841,7 +1899,18 @@ export default function CadastroApp({ onBack = () => {} }) {
                         body: JSON.stringify(mpFormData),
                       });
                       const result = await res.json();
-                      if (result.status === "approved" || result.status === "pending") {
+                      // PIX — mostra QR code na tela
+                      if (result.payment_method_id === "pix" && result.point_of_interaction?.transaction_data) {
+                        const txData = result.point_of_interaction.transaction_data;
+                        setPixData({
+                          qrCode: txData.qr_code,
+                          qrCodeBase64: txData.qr_code_base64,
+                          paymentId: result.id,
+                        });
+                      } else if (result.status === "approved") {
+                        await handleMpSuccess({ paymentId: result.id });
+                      } else if (result.status === "pending") {
+                        // boleto ou outro método pendente — vai para sucesso
                         await handleMpSuccess({ paymentId: result.id });
                       } else {
                         showToast("Pagamento não aprovado. Tente novamente.");
