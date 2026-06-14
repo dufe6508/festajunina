@@ -50,11 +50,9 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
-// No topo do arquivo, adicione:
-import { initMercadoPago, CardPayment, Payment } from "@mercadopago/sdk-react";
+import { initMercadoPago, Wallet } from "@mercadopago/sdk-react";
 
-// Logo abaixo das constantes do Firebase, inicialize o MP:
-initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80");
+initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80", { locale: "pt-BR" });
 
 // Importando o nosso novo Dashboard separado
 import DashboardAdmin from "./DashboardAdmin";
@@ -575,74 +573,40 @@ export default function CadastroApp({ onBack = () => {} }) {
     setCardData((prev) => ({ ...prev, [name]: value }));
   };
 
-const executePayment = async () => {
-  if (
-    paymentMethod === "credit_card" &&
-    (cardData.number.length < 19 ||
-      cardData.name.length < 3 ||
-      cardData.expiry.length < 5 ||
-      cardData.cvv.length < 3)
-  )
-    return showToast("Dados do cartão inválidos.");
+  const [mpPreferenceId, setMpPreferenceId] = useState(null);
 
-  setIsPaymentLoading(true);
-
-  try {
-    let paymentApproved = false;
-
-    if (paymentMethod === "credit_card") {
-      // Tokeniza o cartão via SDK do Mercado Pago
-      const mp = new window.MercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80");
-      
-      const [expMonth, expYear] = cardData.expiry.split("/");
-      const cardToken = await mp.createCardToken({
-        cardNumber: cardData.number.replace(/\s/g, ""),
-        cardholderName: cardData.name,
-        cardExpirationMonth: expMonth,
-        cardExpirationYear: "20" + expYear,
-        securityCode: cardData.cvv,
-        identificationType: "CPF",
-        identificationNumber: currentUser?.cpf?.replace(/\D/g, "") || "",
-      });
-
-      // Chama sua API ou Firebase Function com o token
-      // Por ora, aprovamos se o token foi gerado com sucesso (modo teste)
-      paymentApproved = !!cardToken?.id;
-
-    } else if (paymentMethod === "pix") {
-      // Para PIX em teste, simula aprovação após gerar QR code real
-      const response = await fetch("https://api.mercadopago.com/v1/payments", {
+  // Cria a preferência no Mercado Pago via Vercel Function
+  const executePayment = async () => {
+    if (totalCart === 0) return showToast("Carrinho vazio.");
+    setIsPaymentLoading(true);
+    try {
+      const res = await fetch("/api/create-preference", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer TEST-5215685526075469-061412-561d8834ac8728abeb405ed6e51195a3-380786826`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transaction_amount: totalCart,
-          payment_method_id: "pix",
-          payer: {
-            email: currentUser?.email || "test@test.com",
-            first_name: currentUser?.nomeResponsavel || "Test",
-            identification: {
-              type: "CPF",
-              number: currentUser?.cpf?.replace(/\D/g, "") || "00000000000",
-            },
-          },
+          totalCart,
+          userEmail: currentUser?.email,
+          userName: currentUser?.nomeResponsavel,
+          userCpf: currentUser?.cpf,
         }),
       });
-      const pixData = await response.json();
-      paymentApproved = pixData.status === "pending"; // PIX começa como pending
+      const data = await res.json();
+      if (!res.ok || !data.preferenceId) {
+        showToast("Erro ao iniciar pagamento. Tente novamente.");
+        setIsPaymentLoading(false);
+        return;
+      }
+      setMpPreferenceId(data.preferenceId);
+    } catch (err) {
+      console.error(err);
+      showToast("Erro de conexão. Tente novamente.");
     }
+    setIsPaymentLoading(false);
+  };
 
-    if (!paymentApproved) {
-      showToast("Pagamento não aprovado. Tente novamente.");
-      setIsPaymentLoading(false);
-      return;
-    }
-
-    // Salva o ingresso no Firestore normalmente
-    const newTickets = [];
-    if (cart.ingresso > 0) {
+  // Chamado pelo Wallet do MP quando pagamento é aprovado/pendente
+  const handleMpSuccess = async (paymentData) => {
+    try {
       const uniqueCode = `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
       const ticketData = {
         userId: currentUser.uid,
@@ -652,22 +616,19 @@ const executePayment = async () => {
         price: 15,
         code: uniqueCode,
         criadoEm: new Date().toISOString(),
-        paymentMethod,
+        paymentMethod: "mercadopago",
+        mpPaymentId: paymentData?.paymentId || "",
       };
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
-      newTickets.push({ id: uniqueCode, ...ticketData });
+      setPurchasedTickets((prev) => [...prev, { id: uniqueCode, ...ticketData }]);
+      setMpPreferenceId(null);
+      setCart({ ingresso: 0 });
+      setView("success_purchase");
+    } catch (err) {
+      console.error(err);
+      showToast("Pagamento recebido, mas erro ao salvar ingresso. Contate o suporte.");
     }
-
-    setPurchasedTickets((prev) => [...prev, ...newTickets]);
-    setIsPaymentLoading(false);
-    setView("success_purchase");
-
-  } catch (error) {
-    console.error("Erro no pagamento:", error);
-    showToast("Erro ao processar pagamento.");
-    setIsPaymentLoading(false);
-  }
-};
+  };
 
   const anoLabel = { "1": "1º Ano", "2": "2º Ano", "3": "3º Ano" };
 
@@ -1792,9 +1753,10 @@ const executePayment = async () => {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-[#0a0a0a] rounded-3xl border border-zinc-800 overflow-hidden">
+          {/* Header */}
           <div className="bg-[#0a0a0a] p-6 border-b border-zinc-800 flex items-center gap-4">
             <button
-              onClick={() => setView("dashboard")}
+              onClick={() => { setView("dashboard"); setMpPreferenceId(null); }}
               className="p-2 hover:bg-zinc-900 text-zinc-400 hover:text-white rounded-full transition"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -1809,110 +1771,67 @@ const executePayment = async () => {
               </p>
             </div>
           </div>
+
           <div className="p-6 sm:p-8 space-y-6">
-            <div className="grid grid-cols-2 gap-2 bg-black p-1.5 rounded-xl border border-zinc-800">
-              <button
-                onClick={() => setPaymentMethod("pix")}
-                className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition ${
-                  paymentMethod === "pix"
-                    ? "bg-zinc-900 text-white border border-zinc-700"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                <MdQrCode2 className="h-4 w-4" /> PIX
-              </button>
-              <button
-                onClick={() => setPaymentMethod("credit_card")}
-                className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition ${
-                  paymentMethod === "credit_card"
-                    ? "bg-zinc-900 text-white border border-zinc-700"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                <CreditCard className="h-4 w-4" /> Cartão
-              </button>
+            {/* Resumo do pedido */}
+            <div className="bg-black rounded-2xl border border-zinc-800 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center">
+                  <TicketIcon className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Ingresso – Acesso Geral</p>
+                  <p className="text-xs text-zinc-500">Festa Junina Brandão</p>
+                </div>
+              </div>
+              <span className="text-white font-bold">
+                R$ {totalCart.toFixed(2).replace(".", ",")}
+              </span>
             </div>
 
-            {paymentMethod === "pix" && (
-              <div className="text-center space-y-5 py-4">
-                <div className="bg-white p-4 rounded-2xl inline-block mx-auto">
-                  <MdQrCode2 className="h-40 w-40 text-black" />
-                </div>
-                <p className="text-sm text-zinc-400">
-                  Escaneie o código com seu banco
+            {/* Botão que gera a preferência e mostra o Wallet Brick */}
+            {!mpPreferenceId ? (
+              <Button
+                className="w-full h-14"
+                onClick={executePayment}
+                isLoading={isPaymentLoading}
+              >
+                <CreditCard className="h-5 w-5" />
+                {isPaymentLoading ? "Carregando..." : "Escolher forma de pagamento"}
+              </Button>
+            ) : (
+              <div>
+                <p className="text-xs text-zinc-500 text-center mb-4">
+                  Escolha como quer pagar — PIX, cartão de crédito e mais:
                 </p>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value="00020126580014br.gov.bcb.pix0136..."
-                    className="text-xs font-mono bg-black"
-                  />
-                  <Button
-                    variant="secondary"
-                    onClick={() => showToast("Código copiado!", "success")}
-                    className="px-4"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
+                {/* Wallet Brick do Mercado Pago — renderiza o checkout completo aqui */}
+                <Wallet
+                  initialization={{ preferenceId: mpPreferenceId, redirectMode: "modal" }}
+                  customization={{
+                    texts: { valueProp: "smart_option" },
+                    visual: { buttonBackground: "black", borderRadius: "12px" },
+                  }}
+                  onSubmit={handleMpSuccess}
+                  onError={(err) => {
+                    console.error("MP Brick error:", err);
+                    showToast("Erro no checkout. Tente novamente.");
+                    setMpPreferenceId(null);
+                  }}
+                />
+                <button
+                  onClick={() => setMpPreferenceId(null)}
+                  className="w-full mt-3 text-xs text-zinc-600 hover:text-zinc-400 transition"
+                >
+                  Cancelar e escolher outra forma
+                </button>
               </div>
             )}
-            {paymentMethod === "credit_card" && (
-              <div className="space-y-5 py-2">
-                <div className="space-y-2">
-                  <Label>Número do Cartão</Label>
-                  <Input
-                    name="number"
-                    placeholder="0000 0000 0000 0000"
-                    value={cardData.number}
-                    onChange={handleCardChange}
-                    className="font-mono tracking-widest text-lg"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Nome no Cartão</Label>
-                  <Input
-                    name="name"
-                    placeholder="NOME DO TITULAR"
-                    value={cardData.name}
-                    onChange={handleCardChange}
-                    className="uppercase"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Validade</Label>
-                    <Input
-                      name="expiry"
-                      placeholder="MM/AA"
-                      value={cardData.expiry}
-                      onChange={handleCardChange}
-                      className="text-center font-mono"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>CVV</Label>
-                    <Input
-                      name="cvv"
-                      placeholder="123"
-                      type="password"
-                      maxLength={4}
-                      value={cardData.cvv}
-                      onChange={handleCardChange}
-                      className="text-center font-mono"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-            <Button
-              className="w-full h-14 mt-4"
-              onClick={executePayment}
-              isLoading={isPaymentLoading}
-            >
-              Confirmar Pagamento
-            </Button>
+
+            <p className="text-[11px] text-zinc-600 text-center">
+              Pagamento 100% seguro processado pelo Mercado Pago
+            </p>
           </div>
+
           {toast && (
             <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50">
               {toast.type === "success" ? (
