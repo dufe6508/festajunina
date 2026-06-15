@@ -14,12 +14,18 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
+  // ⚠️ MODO DE TESTE — usando credenciais de teste do Mercado Pago.
+  // Defina MP_ACCESS_TOKEN nas variáveis de ambiente do Vercel para produção.
+  const ACCESS_TOKEN =
+    process.env.MP_ACCESS_TOKEN ||
+    "APP_USR-2742145823707503-061423-663684c6b32baa3c9f7c3afd661b27e5-3473859748";
+
   try {
     const response = await fetch("https://api.mercadopago.com/v1/payments", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
         "X-Idempotency-Key": `${Date.now()}-${Math.random()}`,
       },
       body: JSON.stringify(req.body),
