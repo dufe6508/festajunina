@@ -63,12 +63,16 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // Helpers
-const maskCpf = (cpf) =>
-  cpf
-    ? `***.${cpf.replace(/\D/g, "").slice(3, 6)}.${cpf
-        .replace(/\D/g, "")
-        .slice(6, 9)}-**`
-    : "***.***.***-**";
+// Exibe o CPF completo, formatado com pontuação (ex: 123.456.789-00)
+const formatCpf = (cpf) => {
+  const digits = (cpf || "").replace(/\D/g, "");
+  if (digits.length !== 11) return cpf || "—";
+  return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+};
+
+// Resolve o CPF de um ingresso, priorizando o CPF salvo no próprio
+// ingresso (ingressos manuais) e caindo para o cadastro do usuário
+const getTicketCpf = (t, usersMap) => t?.cpf || usersMap[t?.userId] || "";
 
 const applyCpfMask = (v) => {
   let c = v.replace(/\D/g, "").slice(0, 11);
@@ -246,14 +250,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
 
   // Estados: Adicionar Ingresso
-const [addTicketForm, setAddTicketForm] = useState({
-  nomeAluno: "",
-  ano: "",
-  turma: "",
-  cpf: "",
-  email: "",
-  loteId: "",
-});
+  const [addTicketForm, setAddTicketForm] = useState({
+    nomeAluno: "",
+    ano: "",
+    turma: "",
+    cpf: "",
+    email: "",
+    loteId: "",
+  });
   const [addTicketErrors, setAddTicketErrors] = useState({});
   const [addTicketStatus, setAddTicketStatus] = useState("pendente"); // "pendente" | "validado"
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
@@ -271,17 +275,17 @@ const [addTicketForm, setAddTicketForm] = useState({
     }
   }, [dashboardDetailModal]);
 
-useEffect(() => {
-  if (activeTab === "admin_batches") {
-    fetchBatches();
-  } else {
-    fetchAllTicketsForAdmin();
-  }
-  // Garante que os lotes sempre estejam disponíveis
-  if (activeTab === "admin_add_ticket") {
-    fetchBatches();
-  }
-}, [activeTab]);
+  useEffect(() => {
+    if (activeTab === "admin_batches") {
+      fetchBatches();
+    } else {
+      fetchAllTicketsForAdmin();
+    }
+    // Garante que os lotes sempre estejam disponíveis
+    if (activeTab === "admin_add_ticket") {
+      fetchBatches();
+    }
+  }, [activeTab]);
 
   const showToast = (message, type = "error") => {
     setToast({ message, type });
@@ -518,10 +522,9 @@ useEffect(() => {
     if (!addTicketForm.turma) e.turma = "Selecione a turma";
     if (addTicketForm.cpf.replace(/\D/g, "").length !== 11)
       e.cpf = "CPF inválido";
-if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
+    if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
       e.email = "E-mail inválido";
-    if (!addTicketForm.loteId)
-      e.loteId = "Selecione um lote";
+    if (!addTicketForm.loteId) e.loteId = "Selecione um lote";
     setAddTicketErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -536,7 +539,9 @@ if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
       const usado = addTicketStatus === "validado";
       const agora = new Date().toISOString();
 
-const loteSelecionado = batches.find((b) => b.id === addTicketForm.loteId);
+      const loteSelecionado = batches.find(
+        (b) => b.id === addTicketForm.loteId
+      );
 
       const ticketData = {
         userId: `manual_${uniqueCode}`,
@@ -555,7 +560,7 @@ const loteSelecionado = batches.find((b) => b.id === addTicketForm.loteId);
         origem: "manual_admin",
       };
 
-  await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
 
       // Envia e-mail com o ingresso
       try {
@@ -567,7 +572,9 @@ const loteSelecionado = batches.find((b) => b.id === addTicketForm.loteId);
             nomeAluno: addTicketForm.nomeAluno.trim(),
             code: uniqueCode,
             lote: loteSelecionado?.nome || "Acesso Geral",
-            preco: `R$ ${Number(loteSelecionado?.preco || 0).toFixed(2).replace(".", ",")}`,
+            preco: `R$ ${Number(loteSelecionado?.preco || 0)
+              .toFixed(2)
+              .replace(".", ",")}`,
           }),
         });
       } catch (emailErr) {
@@ -586,7 +593,7 @@ const loteSelecionado = batches.find((b) => b.id === addTicketForm.loteId);
 
       setGeneratedTicket({ id: uniqueCode, ...ticketData });
       showToast("Ingresso gerado com sucesso!", "success");
-setAddTicketForm({
+      setAddTicketForm({
         nomeAluno: "",
         ano: "",
         turma: "",
@@ -709,7 +716,7 @@ setAddTicketForm({
 
   // TicketRow — layout em card com ícone, CPF, código e status
   const TicketRow = ({ t, i, isModal }) => {
-    const cpf = maskCpf(usersMap[t.userId]);
+    const cpf = formatCpf(getTicketCpf(t, usersMap));
     const turmaLabel = t.ano && t.turma ? `${t.ano}º ${t.turma}` : "—";
 
     return (
@@ -1098,16 +1105,17 @@ setAddTicketForm({
 
           {/* ── LISTAS DE PRESENÇA ── */}
           {activeTab === "admin_list" && (
-            <div className="max-w-6xl mx-auto">
+            <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
               {!adminListYear ? (
+                /* ── SELEÇÃO DE ANO ── */
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-xl font-bold text-white">
+                      <h1 className="text-2xl font-bold text-white tracking-tight">
                         Listas de Presença
-                      </h2>
-                      <p className="text-zinc-400 text-sm">
-                        Selecione o ano escolar
+                      </h1>
+                      <p className="text-zinc-500 text-sm mt-1">
+                        Selecione o ano para ver as turmas
                       </p>
                     </div>
                     <Button
@@ -1119,97 +1127,233 @@ setAddTicketForm({
                       Atualizar
                     </Button>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                    {[1, 2, 3].map((a) => (
-                      <button
-                        key={a}
-                        onClick={() => setAdminListYear(String(a))}
-                        className="bg-[#0a0a0a] p-8 border border-zinc-800 rounded-3xl hover:border-zinc-500 transition flex flex-col items-center justify-center group"
+
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((a) => {
+                      const totalAno = allTickets.filter(
+                        (t) => t.ano === String(a)
+                      ).length;
+                      const validadosAno = allTickets.filter(
+                        (t) => t.ano === String(a) && t.usado
+                      ).length;
+                      const pct =
+                        totalAno > 0
+                          ? Math.round((validadosAno / totalAno) * 100)
+                          : 0;
+                      return (
+                        <button
+                          key={a}
+                          onClick={() => setAdminListYear(String(a))}
+                          className="w-full group bg-[#0a0a0a] border border-zinc-800 hover:border-zinc-600 rounded-2xl p-6 flex items-center gap-6 transition-all text-left"
+                        >
+                          {/* Número do ano */}
+                          <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 group-hover:border-zinc-600 flex items-center justify-center shrink-0 transition-colors">
+                            <span className="text-2xl font-black text-white">
+                              {a}
+                            </span>
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline justify-between gap-4 mb-3">
+                              <h2 className="text-lg font-bold text-white leading-tight">
+                                {a}º Ano Médio
+                              </h2>
+                              <div className="flex items-center gap-4 shrink-0">
+                                <div className="text-right hidden sm:block">
+                                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                                    Ingressos
+                                  </p>
+                                  <p className="text-base font-black text-white mt-0.5">
+                                    {totalAno}
+                                  </p>
+                                </div>
+                                <div className="text-right hidden sm:block">
+                                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                                    Presentes
+                                  </p>
+                                  <p className="text-base font-black text-white mt-0.5">
+                                    {validadosAno}
+                                  </p>
+                                </div>
+                                <div className="text-right hidden sm:block">
+                                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                                    Taxa
+                                  </p>
+                                  <p className="text-base font-black text-white mt-0.5">
+                                    {pct}%
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            {/* Barra de progresso */}
+                            <div className="w-full h-1 bg-zinc-900 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-white rounded-full transition-all duration-700"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            {/* Mobile stats */}
+                            <div className="flex items-center gap-4 mt-2 sm:hidden">
+                              <span className="text-xs text-zinc-500">
+                                {totalAno} ingressos
+                              </span>
+                              <span className="text-xs text-zinc-500">
+                                {validadosAno} presentes
+                              </span>
+                              <span className="text-xs text-zinc-500">
+                                {pct}%
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Seta */}
+                          <ChevronRight className="h-5 w-5 text-zinc-600 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Resumo total */}
+                  <div className="grid grid-cols-3 gap-3 pt-2">
+                    {[
+                      { label: "Total Vendidos", val: allTickets.length },
+                      {
+                        label: "Entraram",
+                        val: allTickets.filter((t) => t.usado).length,
+                      },
+                      {
+                        label: "Pendentes",
+                        val: allTickets.filter((t) => !t.usado).length,
+                      },
+                    ].map(({ label, val }) => (
+                      <div
+                        key={label}
+                        className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-4 text-center"
                       >
-                        <div className="w-16 h-16 bg-black border border-zinc-800 rounded-full flex items-center justify-center mb-4">
-                          <GraduationCap className="h-8 w-8 text-white" />
-                        </div>
-                        <h2 className="text-3xl font-black text-white">
-                          {a}º Ano
-                        </h2>
-                        <p className="text-zinc-500 uppercase tracking-widest text-xs mt-2 font-bold group-hover:text-white transition-colors">
-                          Ver turmas <ChevronRight className="inline w-3 h-3" />
+                        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                          {label}
                         </p>
-                      </button>
+                        <p className="text-3xl font-black text-white mt-1">
+                          {val}
+                        </p>
+                      </div>
                     ))}
                   </div>
                 </div>
               ) : !adminListClass ? (
+                /* ── SELEÇÃO DE TURMA ── */
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => setAdminListYear(null)}
-                      className="p-2 bg-zinc-900 text-zinc-400 hover:text-white rounded-full transition"
+                      className="p-2.5 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-xl transition-all"
                     >
-                      <ArrowLeft className="w-5 h-5" />
+                      <ArrowLeft className="w-4 h-4" />
                     </button>
                     <div>
-                      <h2 className="text-xl font-bold text-white">
-                        {adminListYear}º Ano
-                      </h2>
-                      <p className="text-zinc-400 text-sm">Selecione a turma</p>
+                      <h1 className="text-xl font-bold text-white">
+                        {adminListYear}º Ano Médio
+                      </h1>
+                      <p className="text-zinc-500 text-sm">
+                        {
+                          allTickets.filter((t) => t.ano === adminListYear)
+                            .length
+                        }{" "}
+                        ingressos ·{" "}
+                        {
+                          allTickets.filter(
+                            (t) => t.ano === adminListYear && t.usado
+                          ).length
+                        }{" "}
+                        presentes
+                      </p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {Array.from({ length: 12 }, (_, i) =>
                       String.fromCharCode(65 + i)
                     ).map((t) => {
-                      const tot = allTickets.filter(
+                      const total = allTickets.filter(
                         (x) => x.ano === adminListYear && x.turma === t
                       ).length;
+                      const validados = allTickets.filter(
+                        (x) =>
+                          x.ano === adminListYear && x.turma === t && x.usado
+                      ).length;
+                      const pct =
+                        total > 0 ? Math.round((validados / total) * 100) : 0;
+                      const isEmpty = total === 0;
                       return (
                         <button
                           key={t}
                           onClick={() => setAdminListClass(t)}
-                          className="flex items-center justify-between p-4 bg-[#0a0a0a] border border-zinc-800 rounded-xl hover:bg-zinc-900 hover:border-zinc-600 transition-colors group"
+                          className={`group relative bg-[#0a0a0a] border rounded-2xl p-5 flex flex-col text-left transition-all ${
+                            isEmpty
+                              ? "border-zinc-800/60 opacity-50 hover:opacity-80 hover:border-zinc-700"
+                              : "border-zinc-800 hover:border-zinc-500"
+                          }`}
                         >
-                          <span className="font-bold text-white text-sm">
-                            Turma {t}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                              tot > 0
-                                ? "bg-white text-black"
-                                : "bg-zinc-900 text-zinc-500 border border-zinc-800"
-                            }`}
-                          >
-                            {tot} {tot === 1 ? "aluno" : "alunos"}
-                          </span>
+                          {/* Letra da turma */}
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-2xl font-black text-white">
+                              {t}
+                            </span>
+                            {!isEmpty && (
+                              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                                {pct}%
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Stats */}
+                          <p className="text-xs text-zinc-500 mb-3">
+                            {isEmpty
+                              ? "0 alunos"
+                              : `${validados}/${total} presentes`}
+                          </p>
+
+                          {/* Barra de progresso */}
+                          <div className="w-full h-0.5 bg-zinc-900 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-white rounded-full transition-all duration-700"
+                              style={{ width: isEmpty ? "0%" : `${pct}%` }}
+                            />
+                          </div>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               ) : (
+                /* ── LISTA DE ALUNOS DA TURMA ── */
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
                       <button
                         onClick={() => setAdminListClass(null)}
-                        className="p-2 bg-zinc-900 text-zinc-400 hover:text-white rounded-full transition"
+                        className="p-2.5 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-xl transition-all"
                       >
-                        <ArrowLeft className="w-5 h-5" />
+                        <ArrowLeft className="w-4 h-4" />
                       </button>
                       <div>
-                        <h2 className="text-xl font-bold text-white">
+                        <h1 className="text-xl font-bold text-white">
                           {adminListYear}º Ano — Turma {adminListClass}
-                        </h2>
-                        <p className="text-zinc-400 text-sm">
+                        </h1>
+                        <p className="text-zinc-500 text-sm">
                           Presença:{" "}
-                          {
-                            allTickets.filter(
-                              (t) =>
-                                t.ano === adminListYear &&
-                                t.turma === adminListClass &&
-                                t.usado
-                            ).length
-                          }{" "}
-                          /{" "}
+                          <span className="text-white font-semibold">
+                            {
+                              allTickets.filter(
+                                (t) =>
+                                  t.ano === adminListYear &&
+                                  t.turma === adminListClass &&
+                                  t.usado
+                              ).length
+                            }
+                          </span>
+                          {" / "}
                           {
                             allTickets.filter(
                               (t) =>
@@ -1226,7 +1370,7 @@ setAddTicketForm({
                         onClick={exportToXLS}
                         className="h-10 text-xs flex items-center gap-2"
                       >
-                        <Download className="w-4 h-4" /> Exportar Planilha
+                        <Download className="w-4 h-4" /> Exportar
                       </Button>
                       <Button
                         variant="outline"
@@ -1238,17 +1382,64 @@ setAddTicketForm({
                       </Button>
                     </div>
                   </div>
+
+                  {/* Barra de progresso da turma */}
+                  {(() => {
+                    const tot = allTickets.filter(
+                      (t) =>
+                        t.ano === adminListYear && t.turma === adminListClass
+                    ).length;
+                    const val = allTickets.filter(
+                      (t) =>
+                        t.ano === adminListYear &&
+                        t.turma === adminListClass &&
+                        t.usado
+                    ).length;
+                    const pct = tot > 0 ? Math.round((val / tot) * 100) : 0;
+                    return tot > 0 ? (
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex items-center gap-5">
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                              Progresso de Entrada
+                            </p>
+                            <p className="text-sm font-black text-white">
+                              {pct}%
+                            </p>
+                          </div>
+                          <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-white rounded-full transition-all duration-700"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-2xl font-black text-white">
+                            {val}
+                            <span className="text-lg text-zinc-600 font-medium">
+                              /{tot}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mt-0.5">
+                            presentes
+                          </p>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+
                   <div>
                     {allTickets.filter(
                       (t) =>
                         t.ano === adminListYear && t.turma === adminListClass
                     ).length === 0 ? (
-                      <div className="p-12 text-center text-zinc-500">
-                        <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                        Vazia.
+                      <div className="p-16 text-center text-zinc-600 flex flex-col items-center gap-4">
+                        <ClipboardList className="w-12 h-12 opacity-20" />
+                        <p className="text-sm">Nenhum ingresso nesta turma.</p>
                       </div>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         {allTickets
                           .filter(
                             (t) =>
@@ -1610,39 +1801,48 @@ setAddTicketForm({
                       onChange={handleAddTicketChange}
                       error={addTicketErrors.email}
                     />
-{addTicketErrors.email && (
-                    <p className="text-red-400 text-xs">
-                      {addTicketErrors.email}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Lote</Label>
-                  <div className="relative">
-                    <select
-                      name="loteId"
-                      value={addTicketForm.loteId}
-                      onChange={handleAddTicketChange}
-                      className={`flex h-12 w-full appearance-none rounded-xl border ${
-                        addTicketErrors.loteId
-                          ? "border-red-500 bg-red-500/10 text-red-100"
-                          : "border-zinc-800 bg-black text-white"
-                      } px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-white transition-all`}
-                    >
-                      <option value="" disabled>Selecione o lote</option>
-                      {batches.map((b) => (
-                        <option key={b.id} value={b.id} className="bg-zinc-900">
-                          {b.nome} — R$ {Number(b.preco).toFixed(2).replace(".", ",")}
-                        </option>
-                      ))}
-                    </select>
+                    {addTicketErrors.email && (
+                      <p className="text-red-400 text-xs">
+                        {addTicketErrors.email}
+                      </p>
+                    )}
                   </div>
-                  {addTicketErrors.loteId && (
-                    <p className="text-red-400 text-xs">{addTicketErrors.loteId}</p>
-                  )}
+
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>Lote</Label>
+                    <div className="relative">
+                      <select
+                        name="loteId"
+                        value={addTicketForm.loteId}
+                        onChange={handleAddTicketChange}
+                        className={`flex h-12 w-full appearance-none rounded-xl border ${
+                          addTicketErrors.loteId
+                            ? "border-red-500 bg-red-500/10 text-red-100"
+                            : "border-zinc-800 bg-black text-white"
+                        } px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-white transition-all`}
+                      >
+                        <option value="" disabled>
+                          Selecione o lote
+                        </option>
+                        {batches.map((b) => (
+                          <option
+                            key={b.id}
+                            value={b.id}
+                            className="bg-zinc-900"
+                          >
+                            {b.nome} — R${" "}
+                            {Number(b.preco).toFixed(2).replace(".", ",")}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {addTicketErrors.loteId && (
+                      <p className="text-red-400 text-xs">
+                        {addTicketErrors.loteId}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
                 <div className="border-t border-zinc-800 pt-6 space-y-3">
                   <Label>Status do Ingresso</Label>
@@ -2133,7 +2333,9 @@ setAddTicketForm({
                       CPF
                     </p>
                     <p className="text-white font-mono text-sm">
-                      {maskCpf(usersMap[scanResultModal.ticket.userId])}
+                      {formatCpf(
+                        getTicketCpf(scanResultModal.ticket, usersMap)
+                      )}
                     </p>
                   </div>
                 </div>
@@ -2227,7 +2429,7 @@ setAddTicketForm({
                   </p>
                   <p className="text-white font-mono text-sm flex items-center gap-1.5">
                     <FaRegAddressCard className="h-3.5 w-3.5 text-zinc-500" />
-                    {maskCpf(usersMap[infoModalTicket.userId])}
+                    {formatCpf(getTicketCpf(infoModalTicket, usersMap))}
                   </p>
                 </div>
               </div>
