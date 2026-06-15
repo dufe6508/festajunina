@@ -26,6 +26,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { MdQrCode2 } from "react-icons/md";
+import { IoMdDownload } from "react-icons/io";
 // Importações REAIS do Firebase consolidadas
 import { initializeApp } from "firebase/app";
 import {
@@ -2101,10 +2102,10 @@ export default function CadastroApp({ onBack = () => {} }) {
                       <X className="w-5 h-5" />
                     </button>
 
-                    <h3 className="text-xl font-bold text-white mb-1">
+                    <h3 className="text-lg font-semibold text-white mb-1">
                       Seu Passaporte
                     </h3>
-                    <p className="text-sm text-zinc-400 mb-6 text-center">
+                    <p className="text-xs text-zinc-500 mb-6 text-center">
                       Apresente na portaria para liberar sua entrada.
                     </p>
 
@@ -2120,7 +2121,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                     </div>
 
                     {/* Info resumida */}
-                    <div className="w-full space-y-2 mb-6">
+                    <div className="w-full divide-y divide-zinc-800 mb-6">
                       {[
                         {
                           label: "Aluno",
@@ -2146,29 +2147,33 @@ export default function CadastroApp({ onBack = () => {} }) {
                         .map(({ label, value }) => (
                           <div
                             key={label}
-                            className="flex justify-between items-center bg-black border border-zinc-800 rounded-xl px-4 py-2.5"
+                            className="flex justify-between items-center py-2.5"
                           >
-                            <span className="text-xs text-zinc-500 font-bold uppercase tracking-wider">
+                            <span className="text-[11px] text-zinc-500 font-semibold uppercase tracking-wider">
                               {label}
                             </span>
-                            <span className="text-sm font-semibold text-white">
+                            <span className="text-sm font-medium text-white">
                               {value}
                             </span>
                           </div>
                         ))}
                     </div>
 
-                    <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+                    <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
                       Código Verificador
                     </p>
-                    <p className="font-mono text-3xl font-black text-white mt-1 mb-6 tracking-wider">
+                    <p className="font-mono text-2xl font-bold text-white mt-1 mb-6 tracking-wider tabular-nums">
                       {ticket.code}
                     </p>
 
                     {/* Download button */}
-                    <Button className="w-full h-12" onClick={handleDownloadQr}>
-                      ⬇ Baixar QR Code como Imagem
-                    </Button>
+                    <button
+                      onClick={handleDownloadQr}
+                      className="w-full h-11 flex items-center justify-center gap-2 rounded-xl border border-zinc-800 text-zinc-300 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-colors"
+                    >
+                      <IoMdDownload className="w-4 h-4" />
+                      Baixar QR Code
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2497,6 +2502,15 @@ export default function CadastroApp({ onBack = () => {} }) {
             <p className="text-zinc-400 text-sm mt-2">
               Seu ingresso foi gerado.
             </p>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 px-4">
+            <Mail className="h-4 w-4 shrink-0 text-zinc-500" />
+            <span>
+              Enviamos uma cópia do seu ingresso para{" "}
+              <span className="text-white font-medium">
+                {currentUser?.email}
+              </span>
+            </span>
           </div>
           <div className="bg-black p-6 rounded-2xl border border-zinc-800">
             <div className="bg-white p-2 rounded-xl inline-block">
