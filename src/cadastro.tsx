@@ -165,34 +165,76 @@ const Input = React.forwardRef(({ className = "", error, ...props }, ref) => (
 ));
 Input.displayName = "Input";
 
-const Select = ({ value, onChange, options, placeholder, error, name }) => (
-  <div className="relative">
-    <select
-      name={name}
-      value={value}
-      onChange={onChange}
-      className={`flex h-12 w-full appearance-none rounded-xl border ${
-        error
-          ? "border-red-500 bg-red-500/10 text-red-100"
-          : "border-zinc-800 bg-zinc-950 text-white"
-      } px-4 py-2 text-base sm:text-sm focus:outline-none focus:ring-1 focus:ring-white transition-all`}
-    >
-      <option value="" disabled className="text-zinc-500">
-        {placeholder}
-      </option>
-      {options.map((opt) => (
-        <option
-          key={opt.value}
-          value={opt.value}
-          className="bg-zinc-900 text-white"
-        >
-          {opt.label}
-        </option>
-      ))}
-    </select>
-    <ChevronDown className="absolute right-4 top-4 h-4 w-4 text-zinc-500 pointer-events-none" />
-  </div>
-);
+const Select = ({ value, onChange, options, placeholder, error, name }) => {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  const handleSelect = (opt) => {
+    onChange({ target: { name, value: opt.value } });
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex h-12 w-full items-center justify-between rounded-xl border px-4 py-2 text-sm transition-all focus:outline-none ${
+          error
+            ? "border-red-500 bg-red-500/10 text-red-100"
+            : open
+            ? "border-zinc-600 bg-zinc-900 text-white"
+            : "border-zinc-800 bg-zinc-950 text-white hover:border-zinc-600"
+        }`}
+      >
+        <span className={selected ? "text-white" : "text-zinc-500"}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-zinc-400 transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60">
+          <div className="max-h-52 overflow-y-auto py-1 scrollbar-thin">
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => handleSelect(opt)}
+                className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                  opt.value === value
+                    ? "bg-white/10 text-white font-medium"
+                    : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                }`}
+              >
+                {opt.value === value && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-white shrink-0" />
+                )}
+                <span className={opt.value === value ? "" : "ml-[18px]"}>
+                  {opt.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Button = ({
   children,
@@ -287,6 +329,7 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   const [purchasedTickets, setPurchasedTickets] = useState([]);
   const [selectedQr, setSelectedQr] = useState(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // 1. Ouvinte de Autenticação do Firebase e Persistência de Login
   useEffect(() => {
@@ -340,6 +383,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           });
 
           setPurchasedTickets(tickets);
+          setActiveTab("loja");
           setView("dashboard");
         } catch (err) {
           console.error("Erro ao buscar dados do usuário:", err);
@@ -399,6 +443,25 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (c.length > 6) return c.replace(/^(\d{3})(\d{3})(\d{0,3})/, "$1.$2.$3");
     if (c.length > 3) return c.replace(/^(\d{3})(\d{0,3})/, "$1.$2");
     return c;
+  };
+
+  const validateCpf = (cpf) => {
+    const c = cpf.replace(/\D/g, "");
+    if (c.length !== 11) return false;
+    // Rejeita sequências iguais (ex: 111.111.111-11)
+    if (/^(\d)\1{10}$/.test(c)) return false;
+    // Valida 1º dígito verificador
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(c[i]) * (10 - i);
+    let rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    if (rest !== parseInt(c[9])) return false;
+    // Valida 2º dígito verificador
+    sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(c[i]) * (11 - i);
+    rest = (sum * 10) % 11;
+    if (rest === 10 || rest === 11) rest = 0;
+    return rest === parseInt(c[10]);
   };
 
   const handleChange = (e) => {
@@ -472,6 +535,8 @@ export default function CadastroApp({ onBack = () => {} }) {
           cpf: "",
         });
       }
+
+      setIsLoading(false);
     } catch (error) {
       setIsLoading(false);
       if (error.code === "auth/unauthorized-domain") {
@@ -488,7 +553,7 @@ export default function CadastroApp({ onBack = () => {} }) {
     const e = {};
     if (formData.nomeResponsavel.length < 3)
       e.nomeResponsavel = "Mínimo 3 caracteres";
-    if (formData.cpf.replace(/\D/g, "").length !== 11) e.cpf = "CPF inválido";
+    if (!validateCpf(formData.cpf)) e.cpf = "CPF inválido";
     if (!/^\S+@\S+\.\S+$/.test(formData.email)) e.email = "E-mail inválido";
     if (formData.senha.length < 6) e.senha = "Mínimo 6 caracteres";
     if (formData.senha !== formData.confirmarSenha)
@@ -560,7 +625,7 @@ export default function CadastroApp({ onBack = () => {} }) {
   const handleCompleteProfile = async (e) => {
     e.preventDefault();
     const eErrors = {};
-    if (formData.cpf.replace(/\D/g, "").length !== 11)
+    if (!validateCpf(formData.cpf))
       eErrors.cpf = "CPF inválido";
     if (formData.telefone.replace(/\D/g, "").length < 10)
       eErrors.telefone = "Telefone inválido";
@@ -623,7 +688,12 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
   // 5. Logout Seguro via Firebase
-  const handleLogout = async () => {
+  const handleLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutConfirm(false);
     // Se for admin, apenas limpamos o bypass e a sessão mockada
     if (currentUser?.isAdmin) {
       adminBypassRef.current = false;
@@ -1074,7 +1144,7 @@ export default function CadastroApp({ onBack = () => {} }) {
             </div>
             <form onSubmit={handleRegister} className="space-y-6">
               <div className="space-y-2">
-                <Label>Nome Completo (Responsável ou Aluno)</Label>
+                <Label>Nome Completo </Label>
                 <Input
                   name="nomeResponsavel"
                   value={formData.nomeResponsavel}
@@ -1199,7 +1269,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                       onChange={handleChange}
                       error={errors.turma}
                       placeholder="Selecione"
-                      options={Array.from({ length: 6 }, (_, i) => ({
+                      options={Array.from({ length: 12 }, (_, i) => ({
                         value: String.fromCharCode(65 + i),
                         label: `Turma ${String.fromCharCode(65 + i)}`,
                       }))}
@@ -1269,7 +1339,7 @@ export default function CadastroApp({ onBack = () => {} }) {
             </div>
             <form onSubmit={handleCompleteProfile} className="space-y-6">
               <div className="space-y-2">
-                <Label>Nome Completo (Responsável ou Aluno)</Label>
+                <Label>Nome Completo </Label>
                 <Input
                   name="nomeResponsavel"
                   value={formData.nomeResponsavel || ""}
@@ -1344,7 +1414,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                       onChange={handleChange}
                       error={errors.turma}
                       placeholder="Selecione"
-                      options={Array.from({ length: 6 }, (_, i) => ({
+                      options={Array.from({ length: 12 }, (_, i) => ({
                         value: String.fromCharCode(65 + i),
                         label: `Turma ${String.fromCharCode(65 + i)}`,
                       }))}
@@ -1454,6 +1524,10 @@ export default function CadastroApp({ onBack = () => {} }) {
               <button
                 key={key}
                 onClick={() => {
+                  if (key === "inicio") {
+                    onBack();
+                    return;
+                  }
                   setActiveTab(key);
                   if (window.innerWidth < 1024) setSidebarOpen(false);
                 }}
@@ -2206,6 +2280,43 @@ export default function CadastroApp({ onBack = () => {} }) {
               </div>
             );
           })()}
+
+        {/* MODAL CONFIRMAÇÃO DE LOGOUT */}
+        {showLogoutConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowLogoutConfirm(false)}
+          >
+            <div
+              className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl max-w-sm w-full p-8 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-zinc-800">
+                <LogOut className="h-7 w-7 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white text-center mb-2">
+                Sair da conta?
+              </h3>
+              <p className="text-sm text-zinc-400 text-center mb-8">
+                Você precisará fazer login novamente para acessar seus ingressos.
+              </p>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={confirmLogout}
+                  className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-colors"
+                >
+                  Sim, sair da conta
+                </button>
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="w-full h-12 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-semibold rounded-xl transition-colors border border-zinc-800"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {toast && (
           <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50 max-w-xs">
