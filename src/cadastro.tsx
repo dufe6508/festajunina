@@ -52,9 +52,7 @@ import {
 } from "firebase/firestore";
 
 // Mercado Pago Public Key (modo transparente)
-// ⚠️ MODO DE TESTE — Public Key de teste do Mercado Pago.
-// Troque para "APP_USR-c2f301db-a6e5-49aa-9030-ddda699ca4ed" em produção.
-const MP_PUBLIC_KEY = "APP_USR-acf7dac7-662d-4531-b60b-29ee7bdefb08";
+const MP_PUBLIC_KEY = "APP_USR-c2f301db-a6e5-49aa-9030-ddda699ca4ed";
 
 // Carrega o SDK do MP dinamicamente
 const loadMpSdk = () =>
@@ -660,8 +658,6 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [mpPreferenceId, setMpPreferenceId] = useState(null);
   const [pixData, setPixData] = useState(null); // { qrCode, qrCodeBase64, paymentId }
   const [pixCopied, setPixCopied] = useState(false);
-  const [pixStatus, setPixStatus] = useState(null); // "pending" | "approved" | "rejected" | "cancelled"
-  const [pixChecking, setPixChecking] = useState(false);
   const [cardInstallments, setCardInstallments] = useState([]);
 
   // Gera pagamento PIX via API transparente
@@ -693,7 +689,6 @@ export default function CadastroApp({ onBack = () => {} }) {
           qrCodeBase64: txData.qr_code_base64,
           paymentId: result.id,
         });
-        setPixStatus("pending");
       } else {
         showToast(result.message || "Erro ao gerar PIX. Tente novamente.");
       }
@@ -826,8 +821,6 @@ export default function CadastroApp({ onBack = () => {} }) {
       }
 
       setMpPreferenceId(null);
-      setPixData(null);
-      setPixStatus(null);
       setCart({});
       setView("success_purchase");
     } catch (err) {
@@ -837,44 +830,6 @@ export default function CadastroApp({ onBack = () => {} }) {
       );
     }
   };
-
-  // Verifica o status do pagamento PIX no Mercado Pago
-  const checkPixStatus = async (paymentId) => {
-    try {
-      setPixChecking(true);
-      const res = await fetch(`/api/payment-status?id=${paymentId}`);
-      const data = await res.json();
-      return data?.status;
-    } catch (err) {
-      console.error("Erro ao verificar status PIX:", err);
-      return null;
-    } finally {
-      setPixChecking(false);
-    }
-  };
-
-  // Polling automático: verifica o pagamento PIX a cada 5s até aprovação
-  useEffect(() => {
-    if (!pixData?.paymentId || pixStatus === "approved") return;
-
-    const interval = setInterval(async () => {
-      const status = await checkPixStatus(pixData.paymentId);
-      if (!status) return;
-
-      if (status === "approved") {
-        setPixStatus("approved");
-        clearInterval(interval);
-        await handleMpSuccess({ paymentId: pixData.paymentId });
-      } else if (status === "rejected" || status === "cancelled") {
-        setPixStatus(status);
-        clearInterval(interval);
-        showToast("Pagamento PIX não aprovado. Gere um novo código.");
-        setPixData(null);
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [pixData?.paymentId, pixStatus]);
 
   const anoLabel = { "1": "1º Ano", "2": "2º Ano", "3": "3º Ano" };
 
@@ -2292,43 +2247,20 @@ export default function CadastroApp({ onBack = () => {} }) {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-2 text-zinc-500 text-xs py-1">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {pixChecking
-                    ? "Verificando pagamento..."
-                    : "Aguardando confirmação automática do PIX..."}
-                </div>
-
                 <p className="text-xs text-zinc-500 text-center">
-                  A confirmação é automática após o pagamento. Se preferir, confira manualmente:
+                  Após pagar, clique em confirmar para receber seu ingresso
                 </p>
 
-                {/* Confirmar pagamento (verifica status real no Mercado Pago) */}
+                {/* Confirmar pagamento */}
                 <Button
                   className="w-full h-14"
-                  onClick={async () => {
-                    setIsPaymentLoading(true);
-                    const status = await checkPixStatus(pixData.paymentId);
-                    if (status === "approved") {
-                      setPixStatus("approved");
-                      await handleMpSuccess({ paymentId: pixData.paymentId });
-                    } else if (status === "rejected" || status === "cancelled") {
-                      showToast("Pagamento PIX não aprovado. Gere um novo código.");
-                      setPixData(null);
-                    } else {
-                      showToast("Pagamento ainda não identificado. Aguarde um momento e tente novamente.");
-                    }
-                    setIsPaymentLoading(false);
-                  }}
+                  onClick={() => handleMpSuccess({ paymentId: pixData.paymentId })}
                   isLoading={isPaymentLoading}
                 >
-                  <CheckCircle2 className="h-5 w-5" /> Já paguei — Verificar agora
+                  <CheckCircle2 className="h-5 w-5" /> Já paguei — Confirmar
                 </Button>
                 <button
-                  onClick={() => {
-                    setPixData(null);
-                    setPixStatus(null);
-                  }}
+                  onClick={() => setPixData(null)}
                   className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition py-1"
                 >
                   Cancelar e escolher outro método
