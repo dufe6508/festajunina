@@ -48,6 +48,7 @@ import {
   where,
   getDocs,
   updateDoc,
+  runTransaction,
 } from "firebase/firestore";
 
 import { initMercadoPago, Payment } from "@mercadopago/sdk-react";
@@ -673,9 +674,21 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [pixCopied, setPixCopied] = useState(false);
 
   // Chamado pelo Wallet do MP quando pagamento é aprovado/pendente
+  const gerarCodigoIngresso = async () => {
+    const counterRef = doc(db, "config", "ticketCounter");
+    const novoNumero = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(counterRef);
+      const atual = snap.exists() ? snap.data().ultimo : 0;
+      const proximo = atual + 1;
+      transaction.set(counterRef, { ultimo: proximo });
+      return proximo;
+    });
+    return `FJ-${String(novoNumero).padStart(4, "0")}`;
+  };
+
   const handleMpSuccess = async (paymentData) => {
     try {
-      const uniqueCode = `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
+      const uniqueCode = await gerarCodigoIngresso();
 
       // Resgata o nome do lote que estava no carrinho
       const cartValues = Object.values(cart);
@@ -698,14 +711,32 @@ export default function CadastroApp({ onBack = () => {} }) {
         mpPaymentId: paymentData?.paymentId || "",
       };
 
-      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
-      setPurchasedTickets((prev) => [
-        ...prev,
-        { id: uniqueCode, ...ticketData },
-      ]);
-      setMpPreferenceId(null);
-      setCart({});
-      setView("success_purchase");
+await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+setPurchasedTickets((prev) => [
+  ...prev,
+  { id: uniqueCode, ...ticketData },
+]);
+
+// Envia e-mail com o ingresso
+try {
+  await fetch("https://festajunina-api.vercel.app/api/send-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: currentUser.email,
+      nomeAluno: ticketData.nomeAluno,
+      code: uniqueCode,
+      lote: purchasedItem.nome,
+      preco: `R$ ${purchasedItem.preco.toFixed(2).replace(".", ",")}`,
+    }),
+  });
+} catch (emailErr) {
+  console.warn("E-mail não enviado:", emailErr);
+}
+
+setMpPreferenceId(null);
+setCart({});
+setView("success_purchase");
     } catch (err) {
       console.error(err);
       showToast(
@@ -920,20 +951,24 @@ export default function CadastroApp({ onBack = () => {} }) {
                   )}
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>E-mail</Label>
-                <Input
-                  name="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  error={errors.email}
-                  placeholder="seu@email.com"
-                />
-                {errors.email && (
-                  <p className="text-xs text-red-400">{errors.email}</p>
-                )}
-              </div>
+<div className="space-y-2">
+  <Label>E-mail</Label>
+  <Input
+    name="email"
+    type="email"
+    value={formData.email}
+    onChange={handleChange}
+    error={errors.email}
+    placeholder="seu@email.com"
+  />
+  <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
+    <Mail className="h-3 w-3 shrink-0" />
+    Este e-mail será usado para enviar seu ingresso e informações do evento.
+  </p>
+  {errors.email && (
+    <p className="text-xs text-red-400">{errors.email}</p>
+  )}
+</div>
               <div className="grid sm:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label>Senha</Label>
