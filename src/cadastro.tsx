@@ -51,11 +51,18 @@ import {
   runTransaction,
 } from "firebase/firestore";
 
-import { initMercadoPago, Payment } from "@mercadopago/sdk-react";
+// Mercado Pago Public Key (modo transparente)
+const MP_PUBLIC_KEY = "APP_USR-c2f301db-a6e5-49aa-9030-ddda699ca4ed";
 
-initMercadoPago("TEST-0e376194-c29f-4c9b-850b-fadfab595d80", {
-  locale: "pt-BR",
-});
+// Carrega o SDK do MP dinamicamente
+const loadMpSdk = () =>
+  new Promise((resolve) => {
+    if ((window as any).MercadoPago) return resolve((window as any).MercadoPago);
+    const script = document.createElement("script");
+    script.src = "https://sdk.mercadopago.com/js/v2";
+    script.onload = () => resolve((window as any).MercadoPago);
+    document.head.appendChild(script);
+  });
 
 // Importando o nosso novo Dashboard separado
 import DashboardAdmin from "./DashboardAdmin";
@@ -624,33 +631,12 @@ export default function CadastroApp({ onBack = () => {} }) {
     });
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
     if (totalCart === 0) return showToast("Adicione itens ao carrinho.");
-    setIsPaymentLoading(true);
-    try {
-      const res = await fetch("/api/create-preference", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          totalCart,
-          userEmail: currentUser?.email,
-          userName: currentUser?.nomeResponsavel,
-          userCpf: currentUser?.cpf,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.preferenceId) {
-        showToast("Erro ao iniciar pagamento. Tente novamente.");
-        setIsPaymentLoading(false);
-        return;
-      }
-      setMpPreferenceId(data.preferenceId);
-      setView("payment");
-    } catch (err) {
-      console.error(err);
-      showToast("Erro de conexão. Tente novamente.");
-    }
-    setIsPaymentLoading(false);
+    setPaymentMethod("pix");
+    setPixData(null);
+    setCardData({ number: "", name: "", expiry: "", cvv: "" });
+    setView("payment");
   };
 
   const handleCardChange = (e) => {
@@ -672,6 +658,104 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [mpPreferenceId, setMpPreferenceId] = useState(null);
   const [pixData, setPixData] = useState(null); // { qrCode, qrCodeBase64, paymentId }
   const [pixCopied, setPixCopied] = useState(false);
+  const [cardInstallments, setCardInstallments] = useState([]);
+
+  // Gera pagamento PIX via API transparente
+  const handlePixPayment = async () => {
+    setIsPaymentLoading(true);
+    try {
+      const cpfClean = (currentUser?.cpf || "").replace(/\D/g, "");
+      const body = {
+        transaction_amount: totalCart,
+        description: "Ingresso - Festa Junina Brandão",
+        payment_method_id: "pix",
+        payer: {
+          email: currentUser?.email || "comprador@email.com",
+          first_name: (currentUser?.nomeResponsavel || "Comprador").split(" ")[0],
+          last_name: (currentUser?.nomeResponsavel || "").split(" ").slice(1).join(" ") || ".",
+          identification: { type: "CPF", number: cpfClean },
+        },
+      };
+      const res = await fetch("/api/process-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await res.json();
+      if (result.point_of_interaction?.transaction_data) {
+        const txData = result.point_of_interaction.transaction_data;
+        setPixData({
+          qrCode: txData.qr_code,
+          qrCodeBase64: txData.qr_code_base64,
+          paymentId: result.id,
+        });
+      } else {
+        showToast(result.message || "Erro ao gerar PIX. Tente novamente.");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Erro de conexão ao gerar PIX.");
+    }
+    setIsPaymentLoading(false);
+  };
+
+  // Gera token e paga com cartão via API transparente
+  const handleCardPayment = async () => {
+    setIsPaymentLoading(true);
+    try {
+      const MercadoPago = await loadMpSdk();
+      const mp = new MercadoPago(MP_PUBLIC_KEY, { locale: "pt-BR" });
+
+      const [expMonth, expYear] = cardData.expiry.split("/");
+      const cardToken = await mp.createCardToken({
+        cardNumber: cardData.number.replace(/\s/g, ""),
+        cardholderName: cardData.name,
+        cardExpirationMonth: expMonth,
+        cardExpirationYear: `20${expYear}`,
+        securityCode: cardData.cvv,
+        identificationType: "CPF",
+        identificationNumber: (currentUser?.cpf || "").replace(/\D/g, ""),
+      });
+
+      if (!cardToken?.id) {
+        showToast("Dados do cartão inválidos. Verifique e tente novamente.");
+        setIsPaymentLoading(false);
+        return;
+      }
+
+      const cpfClean = (currentUser?.cpf || "").replace(/\D/g, "");
+      const body = {
+        transaction_amount: totalCart,
+        token: cardToken.id,
+        description: "Ingresso - Festa Junina Brandão",
+        installments: 1,
+        payment_method_id: cardToken.payment_method_id || undefined,
+        payer: {
+          email: currentUser?.email || "comprador@email.com",
+          identification: { type: "CPF", number: cpfClean },
+        },
+      };
+
+      const res = await fetch("/api/process-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await res.json();
+
+      if (result.status === "approved") {
+        await handleMpSuccess({ paymentId: result.id });
+      } else if (result.status === "in_process" || result.status === "pending") {
+        await handleMpSuccess({ paymentId: result.id });
+      } else {
+        showToast(result.message || "Pagamento não aprovado. Verifique os dados do cartão.");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao processar cartão. Verifique os dados e tente novamente.");
+    }
+    setIsPaymentLoading(false);
+  };
 
   // Chamado pelo Wallet do MP quando pagamento é aprovado/pendente
   const gerarCodigoIngresso = async () => {
@@ -709,34 +793,36 @@ export default function CadastroApp({ onBack = () => {} }) {
         criadoEm: new Date().toISOString(),
         paymentMethod: "mercadopago",
         mpPaymentId: paymentData?.paymentId || "",
+        turma: currentUser.turma || "",
+        ano: currentUser.ano || "",
       };
 
-await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
-setPurchasedTickets((prev) => [
-  ...prev,
-  { id: uniqueCode, ...ticketData },
-]);
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      setPurchasedTickets((prev) => [
+        ...prev,
+        { id: uniqueCode, ...ticketData },
+      ]);
 
-// Envia e-mail com o ingresso
-try {
-  await fetch("https://festajunina-api.vercel.app/api/send-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      to: currentUser.email,
-      nomeAluno: ticketData.nomeAluno,
-      code: uniqueCode,
-      lote: purchasedItem.nome,
-      preco: `R$ ${purchasedItem.preco.toFixed(2).replace(".", ",")}`,
-    }),
-  });
-} catch (emailErr) {
-  console.warn("E-mail não enviado:", emailErr);
-}
+      // Envia e-mail com o ingresso
+      try {
+        await fetch("https://festajunina-api.vercel.app/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: currentUser.email,
+            nomeAluno: ticketData.nomeAluno,
+            code: uniqueCode,
+            lote: purchasedItem.nome,
+            preco: `R$ ${purchasedItem.preco.toFixed(2).replace(".", ",")}`,
+          }),
+        });
+      } catch (emailErr) {
+        console.warn("E-mail não enviado:", emailErr);
+      }
 
-setMpPreferenceId(null);
-setCart({});
-setView("success_purchase");
+      setMpPreferenceId(null);
+      setCart({});
+      setView("success_purchase");
     } catch (err) {
       console.error(err);
       showToast(
@@ -951,24 +1037,25 @@ setView("success_purchase");
                   )}
                 </div>
               </div>
-<div className="space-y-2">
-  <Label>E-mail</Label>
-  <Input
-    name="email"
-    type="email"
-    value={formData.email}
-    onChange={handleChange}
-    error={errors.email}
-    placeholder="seu@email.com"
-  />
-  <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
-    <Mail className="h-3 w-3 shrink-0" />
-    Este e-mail será usado para enviar seu ingresso e informações do evento.
-  </p>
-  {errors.email && (
-    <p className="text-xs text-red-400">{errors.email}</p>
-  )}
-</div>
+              <div className="space-y-2">
+                <Label>E-mail</Label>
+                <Input
+                  name="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  error={errors.email}
+                  placeholder="seu@email.com"
+                />
+                <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
+                  <Mail className="h-3 w-3 shrink-0" />
+                  Este e-mail será usado para enviar seu ingresso e informações
+                  do evento.
+                </p>
+                {errors.email && (
+                  <p className="text-xs text-red-400">{errors.email}</p>
+                )}
+              </div>
               <div className="grid sm:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label>Senha</Label>
@@ -1455,8 +1542,8 @@ setView("success_purchase");
                           className="w-full"
                           onClick={() =>
                             setSelectedQr(
-                              purchasedTickets[purchasedTickets.length - 1]
-                                ?.code
+                              purchasedTickets[purchasedTickets.length - 1] ||
+                                null
                             )
                           }
                         >
@@ -1689,50 +1776,118 @@ setView("success_purchase");
                         {purchasedTickets.length} ingresso(s)
                       </h3>
                     </div>
-                    {purchasedTickets.map((t) => (
-                      <div
-                        key={t.id}
-                        className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6 relative overflow-hidden"
-                      >
-                        <div className="flex-1 w-full text-center sm:text-left">
-                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">
-                            Passaporte
-                          </p>
-                          <p className="font-bold text-2xl text-white">
-                            {t.type}
-                          </p>
-                          <p className="text-zinc-400 mt-1 text-sm">
-                            Quantidade: {t.qty}
-                          </p>
-                        </div>
+                    {purchasedTickets.map((t) => {
+                      const anoDoTicket = t.ano || currentUser?.ano;
+                      const turmaDoTicket = t.turma || currentUser?.turma;
+                      const turmaLabel =
+                        anoDoTicket && turmaDoTicket
+                          ? `${
+                              anoLabel[anoDoTicket] || anoDoTicket
+                            } Médio · Turma ${turmaDoTicket}`
+                          : turmaDoTicket
+                          ? `Turma ${turmaDoTicket}`
+                          : null;
 
-                        <div className="w-full sm:w-auto bg-black border border-zinc-800 rounded-2xl p-4 flex flex-col items-center gap-3">
-                          <div
-                            className="bg-white p-2 rounded-xl cursor-pointer hover:scale-105 transition-transform"
-                            onClick={() => setSelectedQr(t.code)}
-                            title="Clique para ampliar"
-                          >
-                            <img
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                                t.code
-                              )}`}
-                              alt={`QR Code ${t.code}`}
-                              className="w-24 h-24 object-contain"
-                            />
+                      return (
+                        <div
+                          key={t.id}
+                          className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl overflow-hidden"
+                        >
+                          {/* Stripe topo */}
+                          <div className="h-1 bg-white w-full" />
+
+                          <div className="p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6">
+                            {/* Info do ingresso */}
+                            <div className="flex-1 w-full space-y-4">
+                              <div>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">
+                                  Passaporte
+                                </p>
+                                <p className="font-black text-2xl text-white leading-tight">
+                                  {t.type}
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
+                                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
+                                    Aluno
+                                  </p>
+                                  <p className="text-sm font-semibold text-white truncate">
+                                    {t.nomeAluno ||
+                                      currentUser?.nomeAluno ||
+                                      "—"}
+                                  </p>
+                                </div>
+
+                                <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
+                                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
+                                    Turma
+                                  </p>
+                                  <p className="text-sm font-semibold text-white truncate">
+                                    {turmaLabel || "—"}
+                                  </p>
+                                </div>
+
+                                <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
+                                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
+                                    Lote
+                                  </p>
+                                  <p className="text-sm font-semibold text-white truncate">
+                                    {t.type}
+                                  </p>
+                                </div>
+
+                                <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
+                                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
+                                    Comprado em
+                                  </p>
+                                  <p className="text-sm font-semibold text-white">
+                                    {t.criadoEm
+                                      ? new Date(t.criadoEm).toLocaleDateString(
+                                          "pt-BR",
+                                          {
+                                            day: "2-digit",
+                                            month: "2-digit",
+                                            year: "numeric",
+                                          }
+                                        )
+                                      : "—"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* QR Code */}
+                            <div className="w-full sm:w-auto bg-black border border-zinc-800 rounded-2xl p-4 flex flex-col items-center gap-3 shrink-0">
+                              <div
+                                className="bg-white p-2 rounded-xl cursor-pointer hover:scale-105 transition-transform"
+                                onClick={() => setSelectedQr(t)}
+                                title="Clique para ampliar"
+                              >
+                                <img
+                                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                                    t.code
+                                  )}`}
+                                  alt={`QR Code ${t.code}`}
+                                  className="w-24 h-24 object-contain"
+                                />
+                              </div>
+                              <p className="font-mono font-bold text-white text-sm">
+                                {t.code}
+                              </p>
+                              <Button
+                                variant="ghost"
+                                className="h-8 text-xs w-full border border-zinc-800"
+                                onClick={() => setSelectedQr(t)}
+                              >
+                                Ampliar / Baixar
+                              </Button>
+                            </div>
                           </div>
-                          <p className="font-mono font-bold text-white text-sm">
-                            {t.code}
-                          </p>
-                          <Button
-                            variant="ghost"
-                            className="h-8 text-xs w-full mt-1 border border-zinc-800"
-                            onClick={() => setSelectedQr(t.code)}
-                          >
-                            Ampliar
-                          </Button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
               </div>
@@ -1845,48 +2000,135 @@ setView("success_purchase");
         </div>
 
         {/* QR Code Modal Gigante */}
-        {selectedQr && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
-            onClick={() => setSelectedQr(null)}
-          >
-            <div
-              className="bg-[#0a0a0a] border border-zinc-800 p-8 rounded-3xl max-w-sm w-full flex flex-col items-center relative shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white bg-zinc-900 rounded-full transition-colors"
+        {selectedQr &&
+          (() => {
+            const ticket =
+              typeof selectedQr === "object"
+                ? selectedQr
+                : { code: selectedQr };
+            const anoT = ticket.ano || currentUser?.ano;
+            const turmaT = ticket.turma || currentUser?.turma;
+            const turmaLabelModal =
+              anoT && turmaT
+                ? `${anoLabel[anoT] || anoT} Médio · Turma ${turmaT}`
+                : turmaT
+                ? `Turma ${turmaT}`
+                : null;
+
+            const handleDownloadQr = async () => {
+              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(
+                ticket.code
+              )}&margin=20`;
+              try {
+                const res = await fetch(qrUrl);
+                const blob = await res.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = objectUrl;
+                a.download = `ingresso-${ticket.code}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(objectUrl);
+              } catch {
+                // fallback: abre em nova aba para salvar manualmente
+                window.open(qrUrl, "_blank");
+              }
+            };
+
+            return (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
                 onClick={() => setSelectedQr(null)}
               >
-                <X className="w-5 h-5" />
-              </button>
-              <h3 className="text-xl font-bold text-white mb-2">
-                Seu Passaporte
-              </h3>
-              <p className="text-sm text-zinc-400 mb-8 text-center">
-                Apresente este código na portaria do evento para liberar sua
-                entrada.
-              </p>
+                <div
+                  className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl max-w-sm w-full flex flex-col items-center relative shadow-2xl overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header stripe */}
+                  <div className="h-1 bg-white w-full" />
 
-              <div className="bg-white p-4 rounded-2xl w-full flex justify-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-                    selectedQr
-                  )}`}
-                  alt="QR Code Ampliado"
-                  className="w-full max-w-[250px] aspect-square object-contain"
-                />
+                  <div className="p-8 w-full flex flex-col items-center">
+                    <button
+                      className="absolute top-5 right-5 p-2 text-zinc-500 hover:text-white bg-zinc-900 rounded-full transition-colors"
+                      onClick={() => setSelectedQr(null)}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    <h3 className="text-xl font-bold text-white mb-1">
+                      Seu Passaporte
+                    </h3>
+                    <p className="text-sm text-zinc-400 mb-6 text-center">
+                      Apresente na portaria para liberar sua entrada.
+                    </p>
+
+                    {/* QR */}
+                    <div className="bg-white p-4 rounded-2xl w-full flex justify-center mb-6">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+                          ticket.code
+                        )}`}
+                        alt="QR Code Ampliado"
+                        className="w-full max-w-[250px] aspect-square object-contain"
+                      />
+                    </div>
+
+                    {/* Info resumida */}
+                    <div className="w-full space-y-2 mb-6">
+                      {[
+                        {
+                          label: "Aluno",
+                          value: ticket.nomeAluno || currentUser?.nomeAluno,
+                        },
+                        { label: "Turma", value: turmaLabelModal },
+                        { label: "Lote", value: ticket.type },
+                        {
+                          label: "Comprado em",
+                          value: ticket.criadoEm
+                            ? new Date(ticket.criadoEm).toLocaleDateString(
+                                "pt-BR",
+                                {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  year: "numeric",
+                                }
+                              )
+                            : null,
+                        },
+                      ]
+                        .filter((r) => r.value)
+                        .map(({ label, value }) => (
+                          <div
+                            key={label}
+                            className="flex justify-between items-center bg-black border border-zinc-800 rounded-xl px-4 py-2.5"
+                          >
+                            <span className="text-xs text-zinc-500 font-bold uppercase tracking-wider">
+                              {label}
+                            </span>
+                            <span className="text-sm font-semibold text-white">
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+
+                    <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+                      Código Verificador
+                    </p>
+                    <p className="font-mono text-3xl font-black text-white mt-1 mb-6 tracking-wider">
+                      {ticket.code}
+                    </p>
+
+                    {/* Download button */}
+                    <Button className="w-full h-12" onClick={handleDownloadQr}>
+                      ⬇ Baixar QR Code como Imagem
+                    </Button>
+                  </div>
+                </div>
               </div>
-
-              <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mt-8">
-                Código Verificador
-              </p>
-              <p className="font-mono text-3xl font-black text-white mt-2 tracking-wider">
-                {selectedQr}
-              </p>
-            </div>
-          </div>
-        )}
+            );
+          })()}
 
         {toast && (
           <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50 max-w-xs">
@@ -1902,7 +2144,7 @@ setView("success_purchase");
     );
   }
 
-  /* ─── PAGAMENTO ─── */
+  /* ─── PAGAMENTO TRANSPARENTE ─── */
   if (view === "payment")
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4">
@@ -1912,7 +2154,7 @@ setView("success_purchase");
             <button
               onClick={() => {
                 setView("dashboard");
-                setMpPreferenceId(null);
+                setPixData(null);
               }}
               className="p-2 hover:bg-zinc-900 text-zinc-400 hover:text-white rounded-full transition"
             >
@@ -1929,8 +2171,8 @@ setView("success_purchase");
             </div>
           </div>
 
-          <div className="p-6 sm:p-8 space-y-6">
-            {/* Resumo do pedido modificado para suportar carrinho dinâmico */}
+          <div className="p-6 sm:p-8 space-y-5">
+            {/* Resumo do pedido */}
             {cartItems.map((item, idx) => (
               <div
                 key={idx}
@@ -1941,12 +2183,8 @@ setView("success_purchase");
                     <TicketIcon className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-white">
-                      {item.nome}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      Festa Junina Brandão
-                    </p>
+                    <p className="text-sm font-semibold text-white">{item.nome}</p>
+                    <p className="text-xs text-zinc-500">Festa Junina Brandão</p>
                   </div>
                 </div>
                 <span className="text-white font-bold">
@@ -1955,155 +2193,219 @@ setView("success_purchase");
               </div>
             ))}
 
-            {/* Payment Brick — checkout transparente (PIX, cartão, boleto) */}
+            {/* ── PIX: Exibe QR Code ── */}
             {pixData ? (
               <div className="space-y-4">
-                <div className="flex gap-2 border-b border-zinc-800 pb-4 mb-2">
-                  <div className="flex-1 bg-white text-black rounded-xl py-2 text-center text-sm font-bold flex items-center justify-center gap-2">
-                    <MdQrCode2 className="w-5 h-5" /> PIX
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-3">
+                  <MdQrCode2 className="w-5 h-5 text-green-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">PIX gerado!</p>
+                    <p className="text-xs text-zinc-400">Escaneie ou copie o código abaixo</p>
                   </div>
                 </div>
+
                 {/* QR Code */}
                 <div className="flex justify-center">
-                  <div className="bg-white p-4 rounded-2xl">
+                  <div className="bg-white p-4 rounded-2xl shadow-lg">
                     {pixData.qrCodeBase64 ? (
                       <img
                         src={`data:image/png;base64,${pixData.qrCodeBase64}`}
                         alt="QR Code PIX"
-                        className="w-48 h-48 object-contain"
+                        className="w-52 h-52 object-contain"
                       />
                     ) : (
                       <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-                          pixData.qrCode
-                        )}`}
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(pixData.qrCode)}`}
                         alt="QR Code PIX"
-                        className="w-48 h-48 object-contain"
+                        className="w-52 h-52 object-contain"
                       />
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-zinc-400 text-center">
-                  Escaneie o código com seu banco
-                </p>
+
                 {/* Código copia e cola */}
-                <div className="flex gap-2">
-                  <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-400 font-mono truncate">
-                    {pixData.qrCode?.slice(0, 40)}...
+                <div>
+                  <p className="text-xs text-zinc-500 mb-2 font-medium uppercase tracking-wide">Código PIX copia e cola</p>
+                  <div className="flex gap-2">
+                    <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-400 font-mono truncate">
+                      {pixData.qrCode?.slice(0, 44)}...
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(pixData.qrCode);
+                        setPixCopied(true);
+                        setTimeout(() => setPixCopied(false), 2500);
+                      }}
+                      className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 flex items-center justify-center text-zinc-400 hover:text-white hover:border-zinc-600 transition"
+                    >
+                      {pixCopied ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-400" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(pixData.qrCode);
-                      setPixCopied(true);
-                      setTimeout(() => setPixCopied(false), 2000);
-                    }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 flex items-center justify-center text-zinc-400 hover:text-white transition"
-                  >
-                    {pixCopied ? (
-                      <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
+
+                <p className="text-xs text-zinc-500 text-center">
+                  Após pagar, clique em confirmar para receber seu ingresso
+                </p>
+
                 {/* Confirmar pagamento */}
                 <Button
                   className="w-full h-14"
-                  onClick={() =>
-                    handleMpSuccess({ paymentId: pixData.paymentId })
-                  }
+                  onClick={() => handleMpSuccess({ paymentId: pixData.paymentId })}
+                  isLoading={isPaymentLoading}
                 >
-                  <CheckCircle2 className="h-5 w-5" /> Confirmar Pagamento
+                  <CheckCircle2 className="h-5 w-5" /> Já paguei — Confirmar
                 </Button>
                 <button
-                  onClick={() => {
-                    setPixData(null);
-                    setMpPreferenceId(null);
-                  }}
-                  className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition"
+                  onClick={() => setPixData(null)}
+                  className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition py-1"
                 >
-                  Cancelar
+                  Cancelar e escolher outro método
                 </button>
               </div>
-            ) : mpPreferenceId ? (
-              <div>
-                <Payment
-                  initialization={{
-                    amount: totalCart,
-                    preferenceId: mpPreferenceId,
-                  }}
-                  customization={{
-                    paymentMethods: {
-                      ticket: "all",
-                      bankTransfer: "all",
-                      creditCard: "all",
-                      debitCard: "all",
-                      mercadoPago: "wallet_purchase",
-                    },
-                  }}
-                  onSubmit={async ({
-                    selectedPaymentMethod,
-                    formData: mpFormData,
-                  }) => {
-                    try {
-                      const res = await fetch("/api/process-payment", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(mpFormData),
-                      });
-                      const result = await res.json();
-                      // PIX — mostra QR code na tela
-                      if (
-                        result.payment_method_id === "pix" &&
-                        result.point_of_interaction?.transaction_data
-                      ) {
-                        const txData =
-                          result.point_of_interaction.transaction_data;
-                        setPixData({
-                          qrCode: txData.qr_code,
-                          qrCodeBase64: txData.qr_code_base64,
-                          paymentId: result.id,
-                        });
-                      } else if (result.status === "approved") {
-                        await handleMpSuccess({ paymentId: result.id });
-                      } else if (result.status === "pending") {
-                        // boleto ou outro método pendente — vai para sucesso
-                        await handleMpSuccess({ paymentId: result.id });
-                      } else {
-                        showToast("Pagamento não aprovado. Tente novamente.");
-                      }
-                    } catch (err) {
-                      console.error(err);
-                      showToast("Erro ao processar pagamento.");
-                    }
-                  }}
-                  onError={(err) => {
-                    console.error("MP Brick error:", err);
-                    showToast("Erro no checkout. Tente novamente.");
-                    setMpPreferenceId(null);
-                  }}
-                />
-              </div>
             ) : (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
-                <span className="ml-3 text-zinc-500 text-sm">
-                  Carregando formas de pagamento...
-                </span>
-              </div>
+              <>
+                {/* ── Seletor de método ── */}
+                <div>
+                  <p className="text-xs text-zinc-500 mb-3 font-medium uppercase tracking-wide">Forma de pagamento</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setPaymentMethod("pix")}
+                      className={`flex flex-col items-center gap-2 rounded-2xl border p-4 transition ${
+                        paymentMethod === "pix"
+                          ? "border-white bg-zinc-900 text-white"
+                          : "border-zinc-800 bg-black text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                      }`}
+                    >
+                      <MdQrCode2 className="w-7 h-7" />
+                      <span className="text-sm font-semibold">PIX</span>
+                      <span className="text-[10px] text-zinc-500">Aprovação imediata</span>
+                    </button>
+                    <button
+                      onClick={() => setPaymentMethod("card")}
+                      className={`flex flex-col items-center gap-2 rounded-2xl border p-4 transition ${
+                        paymentMethod === "card"
+                          ? "border-white bg-zinc-900 text-white"
+                          : "border-zinc-800 bg-black text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                      }`}
+                    >
+                      <CreditCard className="w-7 h-7" />
+                      <span className="text-sm font-semibold">Cartão</span>
+                      <span className="text-[10px] text-zinc-500">Crédito / Débito</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── PIX: botão gerar ── */}
+                {paymentMethod === "pix" && (
+                  <div className="space-y-4">
+                    <div className="bg-black border border-zinc-800 rounded-2xl p-4 space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-400">Nome</span>
+                        <span className="text-white font-medium">{currentUser?.nomeResponsavel}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-400">CPF</span>
+                        <span className="text-white font-medium">{currentUser?.cpf}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-400">Valor</span>
+                        <span className="text-white font-bold">R$ {totalCart.toFixed(2).replace(".", ",")}</span>
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full h-14"
+                      onClick={handlePixPayment}
+                      isLoading={isPaymentLoading}
+                    >
+                      <MdQrCode2 className="h-5 w-5" /> Gerar QR Code PIX
+                    </Button>
+                  </div>
+                )}
+
+                {/* ── Cartão: formulário ── */}
+                {paymentMethod === "card" && (
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <div>
+                        <Label>Número do cartão</Label>
+                        <Input
+                          name="number"
+                          value={cardData.number}
+                          onChange={handleCardChange}
+                          placeholder="0000 0000 0000 0000"
+                          maxLength={19}
+                          className="mt-1 font-mono tracking-wider"
+                        />
+                      </div>
+                      <div>
+                        <Label>Nome no cartão</Label>
+                        <Input
+                          name="name"
+                          value={cardData.name}
+                          onChange={handleCardChange}
+                          placeholder="NOME COMO NO CARTÃO"
+                          className="mt-1 uppercase"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>Validade</Label>
+                          <Input
+                            name="expiry"
+                            value={cardData.expiry}
+                            onChange={handleCardChange}
+                            placeholder="MM/AA"
+                            maxLength={5}
+                            className="mt-1 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <Label>CVV</Label>
+                          <Input
+                            name="cvv"
+                            value={cardData.cvv}
+                            onChange={handleCardChange}
+                            placeholder="123"
+                            maxLength={4}
+                            className="mt-1 font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full h-14"
+                      onClick={handleCardPayment}
+                      isLoading={isPaymentLoading}
+                      disabled={
+                        !cardData.number ||
+                        !cardData.name ||
+                        !cardData.expiry ||
+                        !cardData.cvv ||
+                        isPaymentLoading
+                      }
+                    >
+                      <CreditCard className="h-5 w-5" /> Pagar R$ {totalCart.toFixed(2).replace(".", ",")}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
 
-            <p className="text-[11px] text-zinc-600 text-center">
-              Pagamento 100% seguro processado pelo Mercado Pago
+            <p className="text-[11px] text-zinc-600 text-center pt-1">
+              🔒 Pagamento 100% seguro processado pelo Mercado Pago
             </p>
           </div>
 
           {toast && (
-            <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50">
+            <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50 max-w-xs">
               {toast.type === "success" ? (
-                <CheckCircle2 className="h-5 w-5 text-white" />
+                <CheckCircle2 className="h-5 w-5 text-white shrink-0" />
               ) : (
-                <AlertCircle className="h-5 w-5 text-white" />
+                <AlertCircle className="h-5 w-5 text-white shrink-0" />
               )}
               <p className="text-sm font-medium">{toast.message}</p>
             </div>
