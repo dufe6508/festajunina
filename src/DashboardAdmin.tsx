@@ -236,13 +236,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
 
   // Estados: Adicionar Ingresso
-  const [addTicketForm, setAddTicketForm] = useState({
-    nomeAluno: "",
-    ano: "",
-    turma: "",
-    cpf: "",
-    email: "",
-  });
+const [addTicketForm, setAddTicketForm] = useState({
+  nomeAluno: "",
+  ano: "",
+  turma: "",
+  cpf: "",
+  email: "",
+  loteId: "",
+});
   const [addTicketErrors, setAddTicketErrors] = useState({});
   const [addTicketStatus, setAddTicketStatus] = useState("pendente"); // "pendente" | "validado"
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
@@ -260,13 +261,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     }
   }, [dashboardDetailModal]);
 
-  useEffect(() => {
-    if (activeTab === "admin_batches") {
-      fetchBatches();
-    } else {
-      fetchAllTicketsForAdmin();
-    }
-  }, [activeTab]);
+useEffect(() => {
+  if (activeTab === "admin_batches") {
+    fetchBatches();
+  } else {
+    fetchAllTicketsForAdmin();
+  }
+  // Garante que os lotes sempre estejam disponíveis
+  if (activeTab === "admin_add_ticket") {
+    fetchBatches();
+  }
+}, [activeTab]);
 
   const showToast = (message, type = "error") => {
     setToast({ message, type });
@@ -503,8 +508,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     if (!addTicketForm.turma) e.turma = "Selecione a turma";
     if (addTicketForm.cpf.replace(/\D/g, "").length !== 11)
       e.cpf = "CPF inválido";
-    if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
+if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
       e.email = "E-mail inválido";
+    if (!addTicketForm.loteId)
+      e.loteId = "Selecione um lote";
     setAddTicketErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -519,14 +526,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       const usado = addTicketStatus === "validado";
       const agora = new Date().toISOString();
 
+const loteSelecionado = batches.find((b) => b.id === addTicketForm.loteId);
+
       const ticketData = {
         userId: `manual_${uniqueCode}`,
         nomeAluno: addTicketForm.nomeAluno.trim(),
         ano: addTicketForm.ano,
         turma: addTicketForm.turma,
-        type: "Acesso Geral",
+        type: loteSelecionado?.nome || "Acesso Geral",
         qty: 1,
-        price: 15, // Pode ser ajustado conforme a criação manual ou lógica de lote.
+        price: loteSelecionado?.preco || 0,
         code: uniqueCode,
         criadoEm: agora,
         usado,
@@ -536,7 +545,24 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         origem: "manual_admin",
       };
 
-      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+  await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      // Envia e-mail com o ingresso
+      try {
+        await fetch("https://festajunina-api.vercel.app/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: addTicketForm.email,
+            nomeAluno: addTicketForm.nomeAluno.trim(),
+            code: uniqueCode,
+            lote: loteSelecionado?.nome || "Acesso Geral",
+            preco: `R$ ${Number(loteSelecionado?.preco || 0).toFixed(2).replace(".", ",")}`,
+          }),
+        });
+      } catch (emailErr) {
+        console.warn("E-mail não enviado:", emailErr);
+      }
 
       setAllTickets((prev) =>
         [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
@@ -550,13 +576,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
       setGeneratedTicket({ id: uniqueCode, ...ticketData });
       showToast("Ingresso gerado com sucesso!", "success");
-
-      setAddTicketForm({
+setAddTicketForm({
         nomeAluno: "",
         ano: "",
         turma: "",
         cpf: "",
         email: "",
+        loteId: "",
       });
       setAddTicketStatus("pendente");
     } catch (err) {
@@ -1574,13 +1600,39 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       onChange={handleAddTicketChange}
                       error={addTicketErrors.email}
                     />
-                    {addTicketErrors.email && (
-                      <p className="text-red-400 text-xs">
-                        {addTicketErrors.email}
-                      </p>
-                    )}
-                  </div>
+{addTicketErrors.email && (
+                    <p className="text-red-400 text-xs">
+                      {addTicketErrors.email}
+                    </p>
+                  )}
                 </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Lote</Label>
+                  <div className="relative">
+                    <select
+                      name="loteId"
+                      value={addTicketForm.loteId}
+                      onChange={handleAddTicketChange}
+                      className={`flex h-12 w-full appearance-none rounded-xl border ${
+                        addTicketErrors.loteId
+                          ? "border-red-500 bg-red-500/10 text-red-100"
+                          : "border-zinc-800 bg-black text-white"
+                      } px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-white transition-all`}
+                    >
+                      <option value="" disabled>Selecione o lote</option>
+                      {batches.map((b) => (
+                        <option key={b.id} value={b.id} className="bg-zinc-900">
+                          {b.nome} — R$ {Number(b.preco).toFixed(2).replace(".", ",")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {addTicketErrors.loteId && (
+                    <p className="text-red-400 text-xs">{addTicketErrors.loteId}</p>
+                  )}
+                </div>
+              </div>
 
                 <div className="border-t border-zinc-800 pt-6 space-y-3">
                   <Label>Status do Ingresso</Label>
