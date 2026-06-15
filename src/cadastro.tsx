@@ -52,7 +52,7 @@ import {
 } from "firebase/firestore";
 
 // Mercado Pago Public Key (modo transparente)
-const MP_PUBLIC_KEY = "APP_USR-c2f301db-a6e5-49aa-9030-ddda699ca4ed";
+const MP_PUBLIC_KEY = "APP_USR-2742145823707503-061423-663684c6b32baa3c9f7c3afd661b27e5-3473859748";
 
 // Carrega o SDK do MP dinamicamente
 const loadMpSdk = () =>
