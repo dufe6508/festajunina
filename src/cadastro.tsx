@@ -26,6 +26,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { MdQrCode2 } from "react-icons/md";
+import { IoMdDownload } from "react-icons/io";
 // Importações REAIS do Firebase consolidadas
 import { initializeApp } from "firebase/app";
 import {
@@ -2124,26 +2125,23 @@ export default function CadastroApp({ onBack = () => {} }) {
                   className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl max-w-sm w-full flex flex-col items-center relative shadow-2xl overflow-hidden"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* Header stripe */}
-                  <div className="h-1 bg-white w-full" />
-
-                  <div className="p-8 w-full flex flex-col items-center">
+                  <div className="p-7 w-full flex flex-col items-center">
                     <button
-                      className="absolute top-5 right-5 p-2 text-zinc-500 hover:text-white bg-zinc-900 rounded-full transition-colors"
+                      className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white transition-colors"
                       onClick={() => setSelectedQr(null)}
                     >
                       <X className="w-5 h-5" />
                     </button>
 
-                    <h3 className="text-xl font-bold text-white mb-1">
+                    <h3 className="text-lg font-bold text-white mb-1 text-center">
                       Seu Passaporte
                     </h3>
-                    <p className="text-sm text-zinc-400 mb-6 text-center">
-                      Apresente na portaria para liberar sua entrada.
+                    <p className="text-xs text-zinc-500 mb-6 text-center">
+                      Apresente na portaria para liberar sua entrada
                     </p>
 
                     {/* QR */}
-                    <div className="bg-white p-4 rounded-2xl w-full flex justify-center mb-6">
+                    <div className="bg-white p-3 rounded-2xl w-full flex justify-center mb-6">
                       <img
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
                           ticket.code
@@ -2154,7 +2152,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                     </div>
 
                     {/* Info resumida */}
-                    <div className="w-full space-y-2 mb-6">
+                    <div className="w-full space-y-px rounded-xl overflow-hidden border border-zinc-800 mb-6">
                       {[
                         {
                           label: "Aluno",
@@ -2180,28 +2178,28 @@ export default function CadastroApp({ onBack = () => {} }) {
                         .map(({ label, value }) => (
                           <div
                             key={label}
-                            className="flex justify-between items-center bg-black border border-zinc-800 rounded-xl px-4 py-2.5"
+                            className="flex justify-between items-center bg-zinc-950 px-4 py-3"
                           >
-                            <span className="text-xs text-zinc-500 font-bold uppercase tracking-wider">
+                            <span className="text-xs text-zinc-500">
                               {label}
                             </span>
-                            <span className="text-sm font-semibold text-white">
+                            <span className="text-sm font-medium text-white">
                               {value}
                             </span>
                           </div>
                         ))}
                     </div>
 
-                    <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
-                      Código Verificador
+                    <p className="text-[11px] text-zinc-500 tracking-widest mb-1">
+                      Código verificador
                     </p>
-                    <p className="font-mono text-3xl font-black text-white mt-1 mb-6 tracking-wider">
+                    <p className="font-mono text-2xl font-bold text-white mb-6 tracking-wider">
                       {ticket.code}
                     </p>
 
                     {/* Download button */}
                     <Button className="w-full h-12" onClick={handleDownloadQr}>
-                      ⬇ Baixar QR Code como Imagem
+                      <IoMdDownload className="h-5 w-5" /> Baixar QR Code como Imagem
                     </Button>
                   </div>
                 </div>
