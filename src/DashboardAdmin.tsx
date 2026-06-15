@@ -46,6 +46,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  runTransaction,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -78,9 +79,18 @@ const applyCpfMask = (v) => {
   return c;
 };
 
-// Gera um código único de ingresso no padrão #FJ-XXXX
-const generateTicketCode = () =>
-  `#FJ-${Math.floor(1000 + Math.random() * 9000)}`;
+// Gera um código único de ingresso em ordem sequencial: FJ-0001, FJ-0002...
+const generateTicketCode = async (db) => {
+  const counterRef = doc(db, "config", "ticketCounter");
+  const novoNumero = await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(counterRef);
+    const atual = snap.exists() ? snap.data().ultimo : 0;
+    const proximo = atual + 1;
+    transaction.set(counterRef, { ultimo: proximo });
+    return proximo;
+  });
+  return `FJ-${String(novoNumero).padStart(4, "0")}`;
+};
 
 // Nova formatação de data para seguir o padrão visual: "14/06/2026 às 01:44"
 const formatDate = (iso) => {
@@ -522,7 +532,7 @@ if (!/^\S+@\S+\.\S+$/.test(addTicketForm.email))
 
     setIsCreatingTicket(true);
     try {
-      const uniqueCode = generateTicketCode();
+      const uniqueCode = await generateTicketCode(db);
       const usado = addTicketStatus === "validado";
       const agora = new Date().toISOString();
 
