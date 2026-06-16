@@ -1227,10 +1227,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setLoadingBatches(false);
   };
 
+  // DashboardAdmin.tsx — linha 1230
   const processScan = (code) => {
+    // Remove o '#' inicial se vier do input manual ou de um QR que contenha '#'
+    const normalized = code.replace(/^#/, "").toUpperCase();
+
     const t = allTicketsRef.current.find(
-      (x) => x.code.toUpperCase() === code.toUpperCase()
+      (x) => x.code.toUpperCase() === normalized
     );
+    // ...resto igual
     if (!t)
       setScanResultModal({
         type: "error",
