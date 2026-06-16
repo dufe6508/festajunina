@@ -10,6 +10,7 @@ import {
   BarChart3,
   ClipboardList,
   ChevronRight,
+  ChevronDown,
   Search,
   CheckSquare,
   Banknote,
@@ -29,6 +30,12 @@ import {
   Trash2,
   AlertTriangle,
   SlidersHorizontal,
+  Ticket,
+  FileUp,
+  FileSpreadsheet,
+  CheckCircle,
+  XCircle,
+  Info,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
 import {
@@ -37,6 +44,8 @@ import {
 } from "react-icons/io";
 import { IoEyeOutline } from "react-icons/io5";
 import { AiOutlineEyeInvisible } from "react-icons/ai";
+import { MdGroups } from "react-icons/md";
+import { LuTicketPlus, LuTicketCheck } from "react-icons/lu";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -44,6 +53,7 @@ import {
   getDocs,
   doc,
   setDoc,
+  addDoc,
   updateDoc,
   deleteDoc,
   runTransaction,
@@ -168,46 +178,54 @@ const StatCard = ({
   return (
     <C
       onClick={onClick}
-      className={`bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl flex flex-col relative overflow-hidden w-full ${
+      className={`bg-[#0a0a0a] border border-zinc-800/80 p-6 rounded-2xl flex flex-col w-full relative overflow-hidden ${
         onClick
-          ? "group text-left hover:border-zinc-500 transition-colors cursor-pointer"
+          ? "group text-left hover:bg-zinc-900/40 hover:border-zinc-700 transition-all duration-200 cursor-pointer"
           : ""
       }`}
     >
-      <div className="flex items-center gap-4 mb-4">
-        <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl">
-          <Icon
-            className={`h-6 w-6 text-white ${
-              onClick ? "group-hover:scale-110 transition-transform" : ""
-            }`}
-          />
-        </div>
-        <p className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+      {/* Label + ícone */}
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
           {title}
         </p>
+        <Icon className="h-4 w-4 text-zinc-600" />
       </div>
+
+      {/* Valor principal */}
       <p
         className={`${
-          sub ? "text-3xl" : "text-4xl"
-        } font-black text-white mt-auto`}
+          sub ? "text-2xl" : "text-3xl"
+        } font-black text-white leading-none`}
       >
-        {val}{" "}
+        {val}
         {tot != null && (
-          <span className="text-xl text-zinc-600 font-medium">/ {tot}</span>
+          <span className="text-lg text-zinc-700 font-medium ml-1">
+            / {tot}
+          </span>
         )}
       </p>
+
+      {/* Barra de progresso */}
       {pct != null && (
-        <div className="w-full bg-zinc-900 h-1.5 mt-4 rounded-full overflow-hidden">
+        <div className="w-full bg-zinc-900 h-px mt-5 rounded-full overflow-hidden">
           <div
             className={`${bgBar} h-full rounded-full transition-all duration-1000`}
             style={{ width: `${pct}%` }}
           />
         </div>
       )}
+
+      {/* Sub-label */}
       {sub && (
-        <div className="mt-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+        <p className="mt-3 text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
           {sub}
-        </div>
+        </p>
+      )}
+
+      {/* Seta discreta para cards clicáveis */}
+      {onClick && (
+        <ChevronRight className="absolute bottom-5 right-5 h-3.5 w-3.5 text-zinc-700 group-hover:text-zinc-500 transition-colors" />
       )}
     </C>
   );
@@ -249,6 +267,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
 
+  // Estados: Busca de aluno no formulário de adicionar ingresso
+  const [addTicketStudentSearch, setAddTicketStudentSearch] = useState("");
+  const [addTicketStudentResults, setAddTicketStudentResults] = useState<any[]>(
+    []
+  );
+  const [addTicketStudentSearchOpen, setAddTicketStudentSearchOpen] =
+    useState(false);
+  const [addTicketStudentSearchLoading, setAddTicketStudentSearchLoading] =
+    useState(false);
+  const addTicketSearchRef = useRef<HTMLDivElement>(null);
+
   // Estados: Adicionar Ingresso
   const [addTicketForm, setAddTicketForm] = useState({
     nomeAluno: "",
@@ -260,13 +289,124 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   });
   const [addTicketErrors, setAddTicketErrors] = useState({});
   const [addTicketStatus, setAddTicketStatus] = useState("pendente"); // "pendente" | "validado"
+  const [addTicketPago, setAddTicketPago] = useState(false); // pagamento confirmado
+  const [addTicketMetodoPagamento, setAddTicketMetodoPagamento] = useState<
+    "dinheiro" | null
+  >(null); // método de pagamento manual
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [generatedTicket, setGeneratedTicket] = useState(null);
+  const [revenueModalOpen, setRevenueModalOpen] = useState(false); // modal de receita detalhada
+
+  // Estados: Importação de Alunos
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    success: number;
+    failed: number;
+    duplicates: number;
+  } | null>(null);
+  const [importDragActive, setImportDragActive] = useState(false);
+  const [importTypeErrors, setImportTypeErrors] = useState<string[]>([]);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  // Sub-abas da seção de Alunos
+  const [groupsSubTab, setGroupsSubTab] = useState<
+    "import" | "manual" | "search" | "classes"
+  >("import");
+  // Turmas: navegação
+  const [classesYear, setClassesYear] = useState<string | null>(null); // "1","2","3"
+  const [classesClass, setClassesClass] = useState<string | null>(null); // "A".."L"
+  const [classesData, setClassesData] = useState<Record<string, any[]>>({}); // turmaId -> alunos
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classesWithStudents, setClassesWithStudents] = useState<string[]>([]); // turmaIds que têm alunos
+  const [classesWithStudentsLoading, setClassesWithStudentsLoading] =
+    useState(false);
+  // Modal de aluno
+  const [studentModal, setStudentModal] = useState<any | null>(null); // aluno selecionado
+  const [studentModalTicket, setStudentModalTicket] = useState<any | null>(
+    null
+  ); // ingresso do aluno
+  const [studentModalLoading, setStudentModalLoading] = useState(false);
+  // Form de associar ingresso no modal
+  const [associarForm, setAssociarForm] = useState({
+    loteId: "",
+    email: "",
+    status: "pendente",
+    pago: false,
+    metodoPagamento: null as "dinheiro" | null,
+  });
+  const [associarLoading, setAssociarLoading] = useState(false);
+  const [confirmDeleteClass, setConfirmDeleteClass] = useState<string | null>(
+    null
+  ); // turmaId
+  const [deleteClassLoading, setDeleteClassLoading] = useState(false);
+  const [confirmDeleteStudent, setConfirmDeleteStudent] = useState(false);
+  const [deleteStudentLoading, setDeleteStudentLoading] = useState(false);
+  // Pesquisar alunos
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentResults, setStudentResults] = useState<any[]>([]);
+  const [studentSearchLoading, setStudentSearchLoading] = useState(false);
+
+  // Estados: Cadastro Manual de Aluno
+  const emptyManualForm = {
+    nomeAluno: "",
+    ano: "",
+    turma: "",
+    cpf: "",
+    email: "",
+    telefone: "",
+  };
+  const [manualForm, setManualForm] = useState(emptyManualForm);
+  const [manualErrors, setManualErrors] = useState<Record<string, string>>({});
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualSuccessSala, setManualSuccessSala] = useState<string | null>(
+    null
+  );
 
   const allTicketsRef = useRef(allTickets);
   useEffect(() => {
     allTicketsRef.current = allTickets;
   }, [allTickets]);
+
+  // ─── Garante que a coleção "ingressos" e o contador existam no Firebase ───
+  useEffect(() => {
+    const inicializarFirebase = async () => {
+      try {
+        // Garante que o contador existe
+        const counterRef = doc(db, "config", "ticketCounter");
+        const counterSnap = await getDocs(collection(db, "config"));
+        let counterExiste = false;
+        counterSnap.forEach((d) => {
+          if (d.id === "ticketCounter") counterExiste = true;
+        });
+        if (!counterExiste) {
+          await setDoc(counterRef, { ultimo: 0 });
+        }
+        // Garante que a coleção "ingressos" existe (Firestore não cria coleções vazias,
+        // então apenas tentamos buscar — se retornar vazio, está ok e pronto para uso)
+        await getDocs(collection(db, "ingressos"));
+      } catch (err) {
+        console.warn("Erro ao inicializar Firebase:", err);
+      }
+    };
+    inicializarFirebase();
+  }, []);
+
+  useEffect(() => {
+    if (!addTicketStudentSearchOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        addTicketSearchRef.current &&
+        !addTicketSearchRef.current.contains(e.target as Node)
+      ) {
+        setAddTicketStudentSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addTicketStudentSearchOpen]);
 
   useEffect(() => {
     if (!dashboardDetailModal) {
@@ -344,11 +484,693 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setLoadingBatches(false);
   };
 
-  // ─── FUNÇÕES: Salvar Lote e Visibilidade ───
+  // ─── FUNÇÕES: Importação de Alunos ───
+
+  // Carrega o SheetJS dinamicamente (evita bundle extra no projeto)
+  const loadXLSX = (): Promise<any> =>
+    new Promise((resolve) => {
+      if ((window as any).XLSX) return resolve((window as any).XLSX);
+      const s = document.createElement("script");
+      s.src =
+        "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+      s.onload = () => resolve((window as any).XLSX);
+      document.head.appendChild(s);
+    });
+
+  // Lê um File (.xlsx ou .csv) e retorna array de objetos linha
+  const parseFile = async (file: File): Promise<any[]> => {
+    const XLSX = await loadXLSX();
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: "array", raw: false });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    // header: 1 → array de arrays; depois convertemos para objetos
+    const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      defval: "",
+    });
+    if (raw.length < 2) return [];
+    const headers = (raw[0] as string[]).map((h) =>
+      String(h)
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, "")
+    );
+    return raw
+      .slice(1)
+      .map((row, idx) => {
+        const obj: any = { _row: idx + 2 };
+        headers.forEach((h, i) => {
+          obj[h] = String(row[i] ?? "").trim();
+        });
+        return obj;
+      })
+      .filter((obj) =>
+        Object.entries(obj)
+          .filter(([k]) => k !== "_row")
+          .some(([, v]) => String(v).trim() !== "")
+      );
+  };
+
+  // Normaliza os dados para o formato esperado: nome, turma, ano, cpf
+  const normalizeRow = (row: any) => {
+    const nome =
+      row.nome ||
+      row.nomecompleto ||
+      row.nomealuno ||
+      row.name ||
+      row.aluno ||
+      row.nomecompletodoaluno ||
+      "";
+    const turma = (row.turma || row.class || row.sala || "")
+      .toUpperCase()
+      .replace(/\s/g, "");
+    const ano = String(
+      row.ano || row.year || row.serie || row.serie || ""
+    ).replace(/[^0-9]/g, "");
+    const cpf = (row.cpf || row.documento || row.doc || "").replace(/\D/g, "");
+    return { nome: nome.trim(), turma: turma.trim(), ano: ano.trim(), cpf };
+  };
+
+  // Valida uma linha normalizada
+  const validateRow = (
+    r: { nome: string; turma: string; ano: string; cpf: string },
+    rowNum: number
+  ): string | null => {
+    if (!r.nome || r.nome.length < 3)
+      return `Linha ${rowNum}: Nome inválido ("${r.nome}")`;
+    if (!["1", "2", "3"].includes(r.ano))
+      return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
+    if (!/^[A-L]$/.test(r.turma))
+      return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
+    if (r.cpf.length !== 11)
+      return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
+    return null;
+  };
+
+  // Tipos de arquivo permitidos
+  const ALLOWED_EXTENSIONS = [".csv", ".xlsx"];
+  const isAllowedFile = (file: File): boolean => {
+    const name = file.name.toLowerCase();
+    return ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
+  };
+
+  const handleImportFilesChange = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    setImportResult(null);
+    setImportErrors([]);
+    setImportPreview([]);
+    setImportTypeErrors([]);
+
+    // Separar válidos e inválidos por tipo
+    const invalid = fileArray.filter((f) => !isAllowedFile(f));
+    const valid = fileArray.filter((f) => isAllowedFile(f));
+
+    if (invalid.length > 0) {
+      setImportTypeErrors(
+        invalid.map(
+          (f) =>
+            `"${f.name}" não é permitido. Apenas arquivos .csv ou .xlsx são aceitos.`
+        )
+      );
+    }
+
+    if (valid.length === 0) {
+      setImportFiles([]);
+      return;
+    }
+
+    setImportFiles(valid);
+
+    try {
+      const allRows: any[] = [];
+      for (const file of valid) {
+        const rows = await parseFile(file);
+        allRows.push(...rows);
+      }
+
+      if (allRows.length === 0) {
+        setImportErrors([
+          "Arquivo(s) vazio(s) ou sem dados. Verifique se a primeira linha é o cabeçalho.",
+        ]);
+        return;
+      }
+      const normalized = allRows.map((r) => ({
+        ...normalizeRow(r),
+        _row: r._row,
+      }));
+      const errors: string[] = [];
+      normalized.forEach((r) => {
+        const err = validateRow(r, r._row);
+        if (err) errors.push(err);
+      });
+      setImportErrors(errors);
+      setImportPreview(normalized);
+    } catch (err) {
+      setImportErrors([
+        "Erro ao processar arquivo(s). Certifique-se que são .csv ou .xlsm válidos.",
+      ]);
+    }
+  };
+
+  const handleImportSubmit = async () => {
+    if (importPreview.length === 0 || importErrors.length > 0) return;
+    setImportLoading(true);
+    setImportResult(null);
+
+    try {
+      // Usa o preview já normalizado e validado — não faz novo parse
+      const normalized = importPreview;
+
+      let success = 0,
+        failed = 0,
+        duplicates = 0;
+
+      // Busca CPFs já cadastrados em todas as subcoleções
+      const cpfsExistentes = new Set<string>();
+      try {
+        const anosSnap = await getDocs(collection(db, "alunos"));
+        for (const turmaDoc of anosSnap.docs) {
+          const alunosSnap = await getDocs(
+            collection(db, "alunos", turmaDoc.id, "lista")
+          );
+          alunosSnap.forEach((d) => {
+            const cpfRaw = d.data().cpf || "";
+            // Normaliza ao comparar: aceita CPF salvo com ou sem formatação
+            const cpfDigits = cpfRaw.replace(/\D/g, "");
+            if (cpfDigits) cpfsExistentes.add(cpfDigits);
+          });
+        }
+      } catch (e) {
+        console.warn("Erro ao buscar CPFs existentes:", e);
+      }
+
+      for (const row of normalized) {
+        const err = validateRow(row, row._row);
+        if (err) {
+          failed++;
+          continue;
+        }
+        if (cpfsExistentes.has(row.cpf)) {
+          duplicates++;
+          continue;
+        }
+        try {
+          // 1. Garante que o documento pai da turma existe (ex: alunos/3B)
+          const turmaId = `${row.ano}${row.turma}`;
+          await setDoc(
+            doc(db, "alunos", turmaId),
+            {
+              ano: row.ano,
+              turma: row.turma,
+              sala: turmaId,
+            },
+            { merge: true }
+          );
+
+          // 2. Salva o aluno com o nome como ID do documento (ex: Maria_Jose)
+          const nomeId = row.nome.trim().replace(/\s+/g, "_");
+          await setDoc(doc(db, "alunos", turmaId, "lista", nomeId), {
+            nome: row.nome,
+            turma: row.turma,
+            ano: row.ano,
+            cpf: row.cpf,
+            sala: turmaId,
+            cadastradoEm: new Date().toISOString(),
+          });
+          cpfsExistentes.add(row.cpf);
+          success++;
+        } catch (e) {
+          console.error("Erro ao salvar aluno:", row, e);
+          failed++;
+        }
+      }
+
+      setImportResult({ success, failed, duplicates });
+      if (success > 0) {
+        showToast(`${success} aluno(s) importado(s) com sucesso!`, "success");
+      } else {
+        showToast(
+          "Nenhum aluno foi importado. Verifique os dados e as permissões do Firebase.",
+          "error"
+        );
+      }
+    } catch (e) {
+      console.error("Erro geral na importação:", e);
+      showToast("Erro durante a importação.", "error");
+    }
+    setImportLoading(false);
+  };
+
+  // ── Limpar turma completa do Firebase ──
+  const handleDeleteClass = async (turmaId: string) => {
+    setDeleteClassLoading(true);
+    try {
+      const alunosSnap = await getDocs(
+        collection(db, "alunos", turmaId, "lista")
+      );
+      await Promise.all(alunosSnap.docs.map((d) => deleteDoc(d.ref)));
+      // Remove do cache local
+      setClassesData((prev) => {
+        const n = { ...prev };
+        delete n[turmaId];
+        return n;
+      });
+      setClassesWithStudents((prev) => prev.filter((id) => id !== turmaId));
+      // Volta para a listagem de turmas
+      setClassesClass(null);
+      setConfirmDeleteClass(null);
+      showToast("Turma apagada com sucesso!", "success");
+    } catch {
+      showToast("Erro ao apagar a turma.");
+    }
+    setDeleteClassLoading(false);
+  };
+
+  // ── Busca quais turmas do ano selecionado têm alunos ──
+  const fetchClassesWithStudents = async (ano: string) => {
+    setClassesWithStudentsLoading(true);
+    try {
+      const letras = Array.from({ length: 12 }, (_, i) =>
+        String.fromCharCode(65 + i)
+      );
+      const withStudents: string[] = [];
+      await Promise.all(
+        letras.map(async (letra) => {
+          const turmaId = `${ano}${letra}`;
+          const snap = await getDocs(
+            collection(db, "alunos", turmaId, "lista")
+          );
+          if (!snap.empty) withStudents.push(turmaId);
+        })
+      );
+      setClassesWithStudents(withStudents.sort());
+    } catch {
+      showToast("Erro ao verificar turmas.");
+    }
+    setClassesWithStudentsLoading(false);
+  };
+
+  // ── Abre modal do aluno e busca seus dados (ingresso + login) ──
+  const openStudentModal = async (aluno: any, turmaId: string) => {
+    setStudentModal({ ...aluno, turmaId });
+    setStudentModalTicket(null);
+    setStudentModalLoading(true);
+    setAssociarForm({
+      loteId: "",
+      email: "",
+      status: "pendente",
+      pago: false,
+      metodoPagamento: null,
+    });
+    try {
+      // Busca ingresso pelo CPF do aluno
+      const cpfDigits = (aluno.cpf || "").replace(/\D/g, "");
+      const ticket = allTickets.find(
+        (t) =>
+          (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
+          (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+      );
+      setStudentModalTicket(ticket || null);
+      // Tenta enriquecer com dados do usuário logado (email, numero)
+      if (cpfDigits) {
+        const usuariosSnap = await getDocs(collection(db, "usuarios"));
+        usuariosSnap.forEach((d) => {
+          if ((d.data().cpf || "").replace(/\D/g, "") === cpfDigits) {
+            setStudentModal((prev: any) => ({
+              ...prev,
+              _userData: d.data(),
+              _userId: d.id,
+            }));
+          }
+        });
+      }
+    } catch {}
+    setStudentModalLoading(false);
+  };
+
+  // ── Associar ingresso a um aluno pelo modal ──
+  const handleAssociarIngresso = async () => {
+    if (!studentModal || !associarForm.loteId) return;
+    setAssociarLoading(true);
+    try {
+      const uniqueCode = await generateTicketCode(db);
+      const usado = associarForm.status === "validado";
+      const agora = new Date().toISOString();
+      const loteSelecionado = batches.find((b) => b.id === associarForm.loteId);
+      const ticketData = {
+        userId: studentModal._userId || `manual_${uniqueCode}`,
+        nomeAluno: studentModal.nome,
+        ano: studentModal.ano,
+        turma: studentModal.turma,
+        type: loteSelecionado?.nome || "Acesso Geral",
+        qty: 1,
+        price: loteSelecionado?.preco || 0,
+        code: uniqueCode,
+        criadoEm: agora,
+        usado,
+        horaEntrada: usado ? agora : null,
+        cpf: studentModal.cpf,
+        email: associarForm.email || studentModal._userData?.email || "",
+        origem: "manual_admin",
+        pagamentoConfirmado: associarForm.pago,
+        dataPagamento: associarForm.pago ? agora : null,
+        metodoPagamento: associarForm.pago
+          ? associarForm.metodoPagamento === "dinheiro"
+            ? "dinheiro"
+            : "pix"
+          : null,
+      };
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      setAllTickets((prev) =>
+        [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
+          (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
+        )
+      );
+      setStudentModalTicket({ id: uniqueCode, ...ticketData });
+      showToast("Ingresso associado com sucesso!", "success");
+    } catch {
+      showToast("Erro ao associar ingresso.");
+    }
+    setAssociarLoading(false);
+  };
+
+  // ── Validar / Desvalidar ingresso do aluno ──
+  const handleToggleValidarModal = async () => {
+    if (!studentModalTicket) return;
+    setStudentModalLoading(true);
+    try {
+      const agora = new Date().toISOString();
+      const novoUsado = !studentModalTicket.usado;
+      await updateDoc(doc(db, "ingressos", studentModalTicket.id), {
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      });
+      const updated = {
+        ...studentModalTicket,
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      };
+      setStudentModalTicket(updated);
+      setAllTickets((prev) =>
+        prev.map((t) => (t.id === studentModalTicket.id ? updated : t))
+      );
+      showToast(
+        novoUsado ? "Ingresso validado!" : "Validação desfeita!",
+        "success"
+      );
+    } catch {
+      showToast("Erro ao atualizar ingresso.");
+    }
+    setStudentModalLoading(false);
+  };
+
+  // ── Excluir ingresso do aluno pelo modal ──
+  const handleExcluirIngressoModal = async () => {
+    if (!studentModalTicket) return;
+    setStudentModalLoading(true);
+    try {
+      await deleteDoc(doc(db, "ingressos", studentModalTicket.id));
+      setAllTickets((prev) =>
+        prev.filter((t) => t.id !== studentModalTicket.id)
+      );
+      setStudentModalTicket(null);
+      showToast("Ingresso excluído!", "success");
+    } catch {
+      showToast("Erro ao excluir ingresso.");
+    }
+    setStudentModalLoading(false);
+  };
+
+  // ── Excluir aluno do Firebase ──
+  const handleDeleteStudent = async () => {
+    if (!studentModal) return;
+    setDeleteStudentLoading(true);
+    try {
+      const turmaId = studentModal.turmaId;
+      const nomeId = studentModal.id;
+      await deleteDoc(doc(db, "alunos", turmaId, "lista", nomeId));
+      // Remove do cache local
+      setClassesData((prev) => {
+        const n = { ...prev };
+        if (n[turmaId]) {
+          n[turmaId] = n[turmaId].filter((a) => a.id !== nomeId);
+        }
+        return n;
+      });
+      setStudentResults((prev) =>
+        prev.filter((a) => a.id !== nomeId || a.turmaId !== turmaId)
+      );
+      setConfirmDeleteStudent(false);
+      setStudentModal(null);
+      showToast("Aluno excluído com sucesso!", "success");
+    } catch {
+      showToast("Erro ao excluir aluno.");
+    }
+    setDeleteStudentLoading(false);
+  };
+
+  // ── Busca alunos de uma turma específica (ex: "3B") ──
+  const fetchClassStudents = async (turmaId: string) => {
+    if (classesData[turmaId]) return; // já carregado
+    setClassesLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "alunos", turmaId, "lista"));
+      const alunos: any[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        // Compatibilidade: dados antigos salvos como "nomeAluno", novos como "nome"
+        const nome = data.nome || data.nomeAluno || "";
+        alunos.push({ id: d.id, ...data, nome });
+      });
+      alunos.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setClassesData((prev) => ({ ...prev, [turmaId]: alunos }));
+    } catch {
+      showToast("Erro ao buscar alunos da turma.");
+    }
+    setClassesLoading(false);
+  };
+
+  // ── Pesquisa alunos por nome em todas as turmas ──
+  const searchStudents = async (query: string) => {
+    if (!query || query.trim().length < 2) {
+      setStudentResults([]);
+      return;
+    }
+    setStudentSearchLoading(true);
+    try {
+      const anosSnap = await getDocs(collection(db, "alunos"));
+      const results: any[] = [];
+      for (const turmaDoc of anosSnap.docs) {
+        const alunosSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
+        alunosSnap.forEach((d) => {
+          const data = d.data();
+          const nomeAluno = data.nome || data.nomeAluno || "";
+          if (nomeAluno.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+              id: d.id,
+              turmaId: turmaDoc.id,
+              ...data,
+              nome: nomeAluno,
+            });
+          }
+        });
+      }
+      results.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setStudentResults(results);
+    } catch {
+      showToast("Erro ao pesquisar alunos.");
+    }
+    setStudentSearchLoading(false);
+  };
+
+  // ── Pesquisa alunos por nome para o formulário de adicionar ingresso ──
+  const searchStudentsForTicket = async (query: string) => {
+    if (!query || query.trim().length < 2) {
+      setAddTicketStudentResults([]);
+      return;
+    }
+    setAddTicketStudentSearchLoading(true);
+    try {
+      const anosSnap = await getDocs(collection(db, "alunos"));
+      const results: any[] = [];
+      for (const turmaDoc of anosSnap.docs) {
+        const alunosSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
+        alunosSnap.forEach((d) => {
+          const data = d.data();
+          const nomeAluno = data.nome || data.nomeAluno || "";
+          if (nomeAluno.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+              id: d.id,
+              turmaId: turmaDoc.id,
+              ...data,
+              nome: nomeAluno,
+            });
+          }
+        });
+      }
+      results.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setAddTicketStudentResults(results);
+    } catch {
+      showToast("Erro ao pesquisar alunos.");
+    }
+    setAddTicketStudentSearchLoading(false);
+  };
+
+  // ── Preenche o formulário de ingresso com dados do aluno selecionado ──
+  const selectStudentForTicket = (aluno: any) => {
+    const turmaId: string = aluno.turmaId || "";
+    const ano = turmaId.slice(0, 1);
+    const turma = turmaId.slice(1);
+    setAddTicketForm((prev) => ({
+      ...prev,
+      nomeAluno: aluno.nome || "",
+      ano: aluno.ano || ano || "",
+      turma: aluno.turma || turma || "",
+      cpf: formatCpf(aluno.cpf || ""),
+      email: aluno.email || "",
+    }));
+    setAddTicketStudentSearch("");
+    setAddTicketStudentResults([]);
+    setAddTicketStudentSearchOpen(false);
+    setAddTicketErrors({});
+  };
+
+  // ── Helpers internos para o cadastro manual ──
+  const applyPhoneMaskLocal = (v: string) => {
+    const c = v.replace(/\D/g, "").slice(0, 11);
+    if (c.length > 6)
+      return c.replace(/^(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3");
+    if (c.length > 2) return c.replace(/^(\d{2})(\d{0,5})/, "($1) $2");
+    return c.length ? `(${c}` : c;
+  };
+
+  const validateCpfFull = (cpf: string) => {
+    const c = cpf.replace(/\D/g, "");
+    if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(c[i]) * (10 - i);
+    let rest = (sum * 10) % 11;
+    if (rest >= 10) rest = 0;
+    if (rest !== parseInt(c[9])) return false;
+    sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(c[i]) * (11 - i);
+    rest = (sum * 10) % 11;
+    if (rest >= 10) rest = 0;
+    return rest === parseInt(c[10]);
+  };
+
+  const handleManualFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    let v = value;
+    if (name === "cpf") v = applyCpfMask(value);
+    if (name === "telefone") v = applyPhoneMaskLocal(value);
+    setManualForm((prev) => ({ ...prev, [name]: v }));
+    if (manualErrors[name])
+      setManualErrors((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  const handleManualCadastro = async () => {
+    const errs: Record<string, string> = {};
+    if (manualForm.nomeAluno.trim().length < 3)
+      errs.nomeAluno = "Mínimo 3 caracteres";
+    if (!manualForm.ano) errs.ano = "Selecione o ano";
+    if (!manualForm.turma) errs.turma = "Selecione a turma";
+    if (!validateCpfFull(manualForm.cpf)) errs.cpf = "CPF inválido";
+    if (manualForm.email && !/^\S+@\S+\.\S+$/.test(manualForm.email))
+      errs.email = "E-mail inválido";
+    if (
+      manualForm.telefone &&
+      manualForm.telefone.replace(/\D/g, "").length < 10
+    )
+      errs.telefone = "Telefone inválido";
+    setManualErrors(errs);
+    if (Object.keys(errs).length > 0)
+      return showToast("Corrija os erros antes de salvar.");
+
+    setManualLoading(true);
+    const sala = `${manualForm.ano}${manualForm.turma}`;
+    const cpfDigits = manualForm.cpf.replace(/\D/g, "");
+
+    try {
+      // Verifica duplicata em todas as salas
+      const turmasSnap = await getDocs(collection(db, "alunos"));
+      for (const turmaDoc of turmasSnap.docs) {
+        const listaSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
+        for (const alunoDoc of listaSnap.docs) {
+          if ((alunoDoc.data().cpf || "").replace(/\D/g, "") === cpfDigits) {
+            setManualLoading(false);
+            return showToast(`CPF já cadastrado na sala ${turmaDoc.id}.`);
+          }
+        }
+      }
+
+      const payload: Record<string, string> = {
+        nome: manualForm.nomeAluno.trim(),
+        cpf: cpfDigits,
+        sala,
+        ano: manualForm.ano,
+        turma: manualForm.turma,
+        criadoEm: new Date().toISOString(),
+      };
+      if (manualForm.email.trim())
+        payload.email = manualForm.email.trim().toLowerCase();
+      if (manualForm.telefone.trim())
+        payload.telefone = manualForm.telefone.trim();
+
+      // 1. Garante que o documento pai da turma existe (ex: alunos/3B)
+      await setDoc(
+        doc(db, "alunos", sala),
+        {
+          ano: manualForm.ano,
+          turma: manualForm.turma,
+          sala,
+        },
+        { merge: true }
+      );
+
+      // 2. Salva o aluno com o nome como ID do documento (ex: Maria_Jose)
+      const nomeId = manualForm.nomeAluno.trim().replace(/\s+/g, "_");
+      await setDoc(doc(db, "alunos", sala, "lista", nomeId), payload);
+
+      setManualSuccessSala(sala);
+      showToast(`Aluno cadastrado na sala ${sala}!`, "success");
+      setManualForm(emptyManualForm);
+      setManualErrors({});
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao salvar no banco de dados.");
+    }
+    setManualLoading(false);
+  };
+
   const handleSaveBatch = async (e) => {
     e.preventDefault();
     setLoadingBatches(true);
     try {
+      // turmasVisiveis: null = todas as turmas; array = somente as turmas listadas
+      const todasAsTurmas = [1, 2, 3].flatMap((ano) =>
+        Array.from(
+          { length: 12 },
+          (_, i) => `${ano}${String.fromCharCode(65 + i)}`
+        )
+      );
+      const turmasSelecionadas = batchModal.turmasVisiveis;
+      const todasMarcadas =
+        !turmasSelecionadas ||
+        turmasSelecionadas.length === todasAsTurmas.length;
+
       const dataToSave = {
         nome: batchModal.nome,
         preco: Number(batchModal.preco),
@@ -356,6 +1178,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         dataLimite: batchModal.dataLimite || "",
         publico: batchModal.publico || "Ambos",
         visivel: batchModal.visivel !== undefined ? batchModal.visivel : true,
+        turmasVisiveis: todasMarcadas ? null : turmasSelecionadas,
       };
 
       if (batchModal.id) {
@@ -493,7 +1316,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const excluirIngresso = async (ticketId) => {
     setAdminLoading(true);
     try {
-      await deleteDoc(doc(db, "ingressos", ticketId));
+      const counterRef = doc(db, "config", "ticketCounter");
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(counterRef);
+        const atual = snap.exists() ? snap.data().ultimo : 0;
+        if (atual > 0) transaction.set(counterRef, { ultimo: atual - 1 });
+        transaction.delete(doc(db, "ingressos", ticketId));
+      });
       setAllTickets((prev) => prev.filter((t) => t.id !== ticketId));
       showToast("Ingresso excluído com sucesso!", "success");
       setConfirmDeleteTicket(null);
@@ -558,6 +1387,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         cpf: addTicketForm.cpf,
         email: addTicketForm.email,
         origem: "manual_admin",
+        pagamentoConfirmado: addTicketPago,
+        dataPagamento: addTicketPago ? agora : null,
+        metodoPagamento: addTicketPago
+          ? addTicketMetodoPagamento === "dinheiro"
+            ? "dinheiro"
+            : "pix"
+          : null,
       };
 
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
@@ -602,6 +1438,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         loteId: "",
       });
       setAddTicketStatus("pendente");
+      setAddTicketPago(false);
+      setAddTicketMetodoPagamento(null);
     } catch (err) {
       showToast("Erro ao gerar o ingresso.");
     }
@@ -619,52 +1457,148 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       return;
     }
 
+    const turmaLabel = `${adminListYear}º Ano — Turma ${adminListClass}`;
+    const dataExport = new Date().toLocaleDateString("pt-BR");
+    const totalPresentes = filtered.filter((t) => t.usado).length;
+    const totalPendentes = filtered.length - totalPresentes;
+
+    // Cores
+    const COR_HEADER = "#1a1a2e"; // azul escuro — cabeçalho colunas
+    const COR_TITULO = "#16213e"; // azul mais escuro — linha de título
+    const COR_PRESENTE = "#d4edda"; // verde claro
+    const COR_PENDENTE = "#fff3cd"; // amarelo claro
+    const COR_LINHA_PAR = "#f8f9fa"; // cinza levíssimo
+    const COR_RESUMO_BG = "#e8f4fd"; // azul bem claro — linha de resumo
+
     let tableHTML = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"></head>
+      <html xmlns:o="urn:schemas-microsoft-com:office:office"
+            xmlns:x="urn:schemas-microsoft-com:office:excel"
+            xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; }
+          table { border-collapse: collapse; width: 100%; }
+          td, th { padding: 8px 12px; vertical-align: middle; }
+        </style>
+      </head>
       <body>
-        <table border="1">
+        <table>
+
+          <!-- Linha de título -->
+          <tr>
+            <td colspan="6"
+                style="background-color:${COR_TITULO}; color:#ffffff; font-size:15pt;
+                       font-weight:bold; padding:14px 16px; letter-spacing:1px;">
+              Lista de Presença — ${turmaLabel}
+            </td>
+          </tr>
+
+          <!-- Linha de info -->
+          <tr>
+            <td colspan="6"
+                style="background-color:#2c3e6b; color:#c8d8f0; font-size:9pt;
+                       padding:6px 16px;">
+              Exportado em ${dataExport} &nbsp;|&nbsp;
+              ${filtered.length} aluno(s) &nbsp;|&nbsp;
+              ${totalPresentes} presente(s) &nbsp;|&nbsp;
+              ${totalPendentes} pendente(s)
+            </td>
+          </tr>
+
+          <!-- Linha vazia separadora -->
+          <tr><td colspan="6" style="padding:4px;"></td></tr>
+
+          <!-- Cabeçalho das colunas -->
           <thead>
-            <tr style="background-color: #333; color: #fff;">
-              <th>Nome do Aluno</th>
-              <th>Turma</th>
-              <th>CPF do Responsável/Aluno</th>
-              <th>Código do Convite</th>
-              <th>Status</th>
-              <th>Data da Compra</th>
-              <th>Data de Validação</th>
+            <tr style="background-color:${COR_HEADER}; color:#ffffff;">
+              <th style="width:50px;  text-align:center; border:1px solid #0d0d1a;">#</th>
+              <th style="width:240px; text-align:left;   border:1px solid #0d0d1a;">Nome do Aluno</th>
+              <th style="width:80px;  text-align:center; border:1px solid #0d0d1a;">Turma</th>
+              <th style="width:130px; text-align:center; border:1px solid #0d0d1a;">Código</th>
+              <th style="width:90px;  text-align:center; border:1px solid #0d0d1a;">Status</th>
+              <th style="width:160px; text-align:center; border:1px solid #0d0d1a;">Hora de Entrada</th>
             </tr>
           </thead>
           <tbody>
     `;
 
-    filtered.forEach((t) => {
+    filtered.forEach((t, i) => {
       const turmaFmt = `${t.ano}º ${t.turma}`;
-      const cpf = usersMap[t.userId] || "—";
-      const status = t.usado ? "Presente" : "Pendente";
-      const dtCompra = formatDate(t.criadoEm);
-      const dtValida = t.usado ? formatDate(t.horaEntrada) : "—";
+      const presente = t.usado;
+      const status = presente ? "✓ Presente" : "Pendente";
+      const dtValida = presente ? formatDate(t.horaEntrada) : "—";
+      const bgRow = presente
+        ? COR_PRESENTE
+        : i % 2 === 0
+        ? "#ffffff"
+        : COR_LINHA_PAR;
+      const corStatus = presente ? "#155724" : "#856404";
+      const bgStatus = presente ? "#c3e6cb" : "#ffeeba";
 
       tableHTML += `
-        <tr>
-          <td>${t.nomeAluno || "—"}</td>
-          <td>${turmaFmt}</td>
-          <td>${cpf}</td>
-          <td>${t.code}</td>
-          <td>${status}</td>
-          <td>${dtCompra}</td>
-          <td>${dtValida}</td>
+        <tr style="background-color:${bgRow};">
+          <td style="text-align:center; border:1px solid #dee2e6; color:#6c757d; font-size:9pt;">
+            ${i + 1}
+          </td>
+          <td style="border:1px solid #dee2e6; font-weight:${
+            presente ? "bold" : "normal"
+          };">
+            ${t.nomeAluno || "—"}
+          </td>
+          <td style="text-align:center; border:1px solid #dee2e6; color:#495057;">
+            ${turmaFmt}
+          </td>
+          <td style="text-align:center; border:1px solid #dee2e6; font-family:monospace; color:#495057; font-size:10pt;">
+            ${t.code || "—"}
+          </td>
+          <td style="text-align:center; border:1px solid #dee2e6;">
+            <span style="background-color:${bgStatus}; color:${corStatus};
+                         padding:2px 8px; border-radius:4px; font-weight:bold; font-size:9pt;">
+              ${status}
+            </span>
+          </td>
+          <td style="text-align:center; border:1px solid #dee2e6; color:#495057; font-size:9pt;">
+            ${dtValida}
+          </td>
         </tr>
       `;
     });
 
-    tableHTML += `</tbody></table></body></html>`;
+    // Linha de resumo final
+    tableHTML += `
+          <!-- Linha vazia -->
+          <tr><td colspan="6" style="padding:4px;"></td></tr>
+
+          <!-- Resumo -->
+          <tr style="background-color:${COR_RESUMO_BG};">
+            <td colspan="4"
+                style="border:1px solid #b8daff; padding:8px 12px;
+                       font-weight:bold; color:#004085;">
+              Resumo da Turma
+            </td>
+            <td colspan="2"
+                style="border:1px solid #b8daff; padding:8px 12px; color:#004085;">
+              ${totalPresentes} de ${filtered.length} presentes
+              (${
+                filtered.length > 0
+                  ? Math.round((totalPresentes / filtered.length) * 100)
+                  : 0
+              }%)
+            </td>
+          </tr>
+
+        </tbody>
+        </table>
+      </body>
+      </html>
+    `;
 
     const blob = new Blob([tableHTML], { type: "application/vnd.ms-excel" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Lista_Turma_${adminListYear}Ano_${adminListClass}.xls`;
+    link.download = `lista_presenca_${adminListYear}${adminListClass}.xls`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -675,10 +1609,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const getDetailedList = () => {
     let list =
       dashboardDetailModal === "vendidos"
-        ? [...allTickets]
+        ? allTickets.filter((t) => t.pagamentoConfirmado)
         : dashboardDetailModal === "entraram"
         ? allTickets.filter((t) => t.usado)
-        : allTickets.filter((t) => !t.usado);
+        : allTickets.filter((t) => !t.pagamentoConfirmado);
     if (filterYear) list = list.filter((t) => t.ano === filterYear);
     if (filterClass) list = list.filter((t) => t.turma === filterClass);
     return list.sort((a, b) =>
@@ -751,20 +1685,32 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
         <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-5 pl-[60px] sm:pl-0 shrink-0">
           <div className="flex flex-col items-start sm:items-end gap-1">
-            <span
-              className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full ${
-                t.usado
-                  ? "bg-green-500/10 text-green-400"
-                  : "bg-zinc-800 text-zinc-400"
-              }`}
-            >
-              {t.usado ? (
-                <CheckCircle2 className="h-3 w-3" />
-              ) : (
-                <Clock className="h-3 w-3" />
-              )}
-              {t.usado ? "Validado" : "Pendente"}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full ${
+                  t.usado
+                    ? "bg-green-500/10 text-green-400"
+                    : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {t.usado ? (
+                  <LuTicketCheck className="h-3 w-3" />
+                ) : (
+                  <Clock className="h-3 w-3" />
+                )}
+                {t.usado ? "Validado" : "Pendente"}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${
+                  t.pagamentoConfirmado
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : "bg-yellow-500/10 text-yellow-500"
+                }`}
+              >
+                <Banknote className="h-3 w-3" />
+                {t.pagamentoConfirmado ? "Pago" : "Não pago"}
+              </span>
+            </div>
             <span className="text-zinc-500 text-[11px] font-medium">
               {t.usado
                 ? formatDate(t.horaEntrada)
@@ -848,11 +1794,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               icon: Search,
             },
             {
-              key: "admin_add_ticket",
-              label: "Adicionar Ingresso",
-              icon: UserPlus,
-            },
-            {
               key: "admin_batches",
               label: "Gestão de Lotes",
               icon: IoMdAddCircleOutline,
@@ -880,6 +1821,53 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               </span>
             </button>
           ))}
+
+          {/* Botão Adicionar Ingresso com ícone de ticket SVG */}
+          <button
+            onClick={() => {
+              setActiveTab("admin_add_ticket");
+              if (window.innerWidth < 1024) setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center rounded-xl transition-all h-12 text-sm font-medium whitespace-nowrap ${
+              activeTab === "admin_add_ticket"
+                ? "bg-white text-black"
+                : "text-zinc-500 hover:bg-zinc-900 hover:text-white"
+            } ${sidebarOpen ? "lg:px-3 lg:justify-start" : ""}`}
+          >
+            {/* Ícone ticket + (add ticket) */}
+            <LuTicketPlus className="h-5 w-5 shrink-0" />
+            <span
+              className={
+                sidebarOpen ? "opacity-100 block" : "lg:hidden opacity-0 w-0"
+              }
+            >
+              Adicionar Ingresso
+            </span>
+          </button>
+
+          {/* Botão Importar Alunos */}
+          <div className="relative group">
+            <button
+              onClick={() => {
+                setActiveTab("admin_groups");
+                if (window.innerWidth < 1024) setSidebarOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center rounded-xl transition-all h-12 text-sm font-medium whitespace-nowrap ${
+                activeTab === "admin_groups"
+                  ? "bg-white text-black"
+                  : "text-zinc-500 hover:bg-zinc-900 hover:text-white"
+              } ${sidebarOpen ? "lg:px-3 lg:justify-start" : ""}`}
+            >
+              <MdGroups className="h-5 w-5 shrink-0" />
+              <span
+                className={
+                  sidebarOpen ? "opacity-100 block" : "lg:hidden opacity-0 w-0"
+                }
+              >
+                Importar Alunos
+              </span>
+            </button>
+          </div>
         </nav>
         <div className="p-4 border-t border-zinc-800 shrink-0 space-y-2">
           <button
@@ -941,6 +1929,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 ? "Pesquisar Ingressos"
                 : activeTab === "admin_batches"
                 ? "Gestão de Lotes"
+                : activeTab === "admin_groups"
+                ? "Alunos"
                 : "Listas de Presença"}
             </h2>
           </div>
@@ -1036,41 +2026,63 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
           {/* ── DASHBOARD ── */}
           {activeTab === "admin_dashboard" && (
-            <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="flex items-center justify-between">
+            <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <div className="flex items-end justify-between">
                 <div>
-                  <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                    <BarChart3 className="h-6 w-6 text-white" /> Visão Geral
-                  </h1>
-                  <p className="text-zinc-400 text-sm mt-1">
-                    Clique nos cards para detalhes.
+                  <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2">
+                    Painel
                   </p>
+                  <h1 className="text-3xl font-black text-white tracking-tight">
+                    Visão Geral
+                  </h1>
                 </div>
-                <Button
-                  variant="outline"
+                <button
                   onClick={fetchAllTicketsForAdmin}
-                  isLoading={adminLoading}
+                  disabled={adminLoading}
+                  className="flex items-center gap-2 text-xs font-bold text-zinc-500 hover:text-white transition-colors disabled:opacity-40 uppercase tracking-widest"
                 >
+                  {adminLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <svg
+                      className="h-3.5 w-3.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                      <path d="M21 3v5h-5" />
+                    </svg>
+                  )}
                   Atualizar
-                </Button>
+                </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
                 <StatCard
                   title="Vendidos"
-                  val={allTickets.length}
+                  val={allTickets.filter((t) => t.pagamentoConfirmado).length}
                   icon={ShoppingCart}
-                  pct={allTickets.length > 0 ? 100 : 0}
+                  pct={
+                    allTickets.length > 0
+                      ? (allTickets.filter((t) => t.pagamentoConfirmado)
+                          .length /
+                          allTickets.length) *
+                        100
+                      : 0
+                  }
                   onClick={() => setDashboardDetailModal("vendidos")}
                 />
                 <StatCard
                   title="Entraram"
                   val={allTickets.filter((t) => t.usado).length}
-                  tot={allTickets.length}
+                  tot={allTickets.filter((t) => t.pagamentoConfirmado).length}
                   icon={CheckSquare}
                   pct={
-                    allTickets.length > 0
+                    allTickets.filter((t) => t.pagamentoConfirmado).length > 0
                       ? (allTickets.filter((t) => t.usado).length /
-                          allTickets.length) *
+                          allTickets.filter((t) => t.pagamentoConfirmado)
+                            .length) *
                         100
                       : 0
                   }
@@ -1078,11 +2090,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 />
                 <StatCard
                   title="Pendentes"
-                  val={allTickets.filter((t) => !t.usado).length}
+                  val={allTickets.filter((t) => !t.pagamentoConfirmado).length}
                   icon={Clock}
                   pct={
                     allTickets.length > 0
-                      ? (allTickets.filter((t) => !t.usado).length /
+                      ? (allTickets.filter((t) => !t.pagamentoConfirmado)
+                          .length /
                           allTickets.length) *
                         100
                       : 0
@@ -1092,12 +2105,24 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 />
                 <StatCard
                   title="Receita (R$)"
-                  val={`R$ ${allTickets
-                    .reduce((acc, t) => acc + (t.price || 15), 0)
-                    .toFixed(2)
-                    .replace(".", ",")}`}
+                  val={(() => {
+                    const pagos = allTickets.filter(
+                      (t) => t.pagamentoConfirmado
+                    );
+                    const TAXA_PIX = 0.0099;
+                    const TAXA_CARTAO = 0.0498;
+                    const liquido = pagos.reduce((acc, t) => {
+                      const bruto = t.price || 0;
+                      if (t.metodoPagamento === "cartao")
+                        return acc + bruto * (1 - TAXA_CARTAO);
+                      if (t.metodoPagamento === "dinheiro") return acc + bruto;
+                      return acc + bruto * (1 - TAXA_PIX); // pix ou sem método = pix
+                    }, 0);
+                    return `R$ ${liquido.toFixed(2).replace(".", ",")}`;
+                  })()}
                   icon={Banknote}
-                  sub="Valor Bruto Arrecadado"
+                  sub="Valor Líquido Arrecadado"
+                  onClick={() => setRevenueModalOpen(true)}
                 />
               </div>
             </div>
@@ -1691,6 +2716,108 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               </div>
 
               <div className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl p-6 sm:p-8 space-y-6">
+                {/* ── Busca rápida de aluno ── */}
+                <div ref={addTicketSearchRef} className="relative">
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar aluno do sistema para preencher..."
+                        value={addTicketStudentSearch}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setAddTicketStudentSearch(v);
+                          setAddTicketStudentSearchOpen(true);
+                          searchStudentsForTicket(v);
+                        }}
+                        onFocus={() => setAddTicketStudentSearchOpen(true)}
+                        className="flex h-12 w-full rounded-xl border border-zinc-700 bg-zinc-900/60 text-white pl-10 pr-4 py-2 text-sm placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all"
+                      />
+                      {addTicketStudentSearchLoading && (
+                        <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                      )}
+                      {addTicketStudentSearch &&
+                        !addTicketStudentSearchLoading && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddTicketStudentSearch("");
+                              setAddTicketStudentResults([]);
+                              setAddTicketStudentSearchOpen(false);
+                            }}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  {/* Dropdown de resultados */}
+                  {addTicketStudentSearchOpen &&
+                    addTicketStudentSearch.length >= 2 && (
+                      <div className="absolute z-50 top-[calc(100%+6px)] left-0 right-0 bg-[#111] border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
+                        {addTicketStudentResults.length === 0 &&
+                        !addTicketStudentSearchLoading ? (
+                          <div className="py-10 text-center text-zinc-600 flex flex-col items-center gap-2">
+                            <Search className="h-6 w-6 opacity-30" />
+                            <p className="text-xs">
+                              Nenhum aluno encontrado para "
+                              {addTicketStudentSearch}"
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/60">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                Selecione um aluno
+                              </p>
+                              <span className="text-[10px] text-zinc-600">
+                                {addTicketStudentResults.length} resultado(s)
+                              </span>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-zinc-800/40">
+                              {addTicketStudentResults.map((aluno, i) => (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => selectStudentForTicket(aluno)}
+                                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-zinc-900/50 transition-colors text-left"
+                                >
+                                  <div>
+                                    <p className="text-white font-semibold text-sm">
+                                      {aluno.nome}
+                                    </p>
+                                    <p className="text-zinc-500 text-xs mt-0.5 font-mono">
+                                      {formatCpf(aluno.cpf)}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400">
+                                      {aluno.ano || aluno.turmaId?.slice(0, 1)}º
+                                      · {aluno.turma || aluno.turmaId?.slice(1)}
+                                    </span>
+                                    <ChevronRight className="h-3.5 w-3.5 text-zinc-600" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                </div>
+
+                {/* Divisor */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-zinc-800" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                    ou preencha manualmente
+                  </span>
+                  <div className="flex-1 h-px bg-zinc-800" />
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div className="space-y-2 sm:col-span-2">
                     <Label>Nome do Aluno</Label>
@@ -1872,6 +2999,93 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   </div>
                 </div>
 
+                {/* Toggle Pagamento Confirmado */}
+                <div className="border-t border-zinc-800 pt-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddTicketPago((v) => !v);
+                      setAddTicketMetodoPagamento(null);
+                    }}
+                    className={`w-full flex items-center justify-between px-5 py-4 rounded-xl border transition-all ${
+                      addTicketPago
+                        ? "border-green-500/40 bg-green-500/5"
+                        : "border-zinc-800 bg-black hover:border-zinc-700"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Banknote
+                        className={`h-5 w-5 ${
+                          addTicketPago ? "text-green-400" : "text-zinc-500"
+                        }`}
+                      />
+                      <div className="text-left">
+                        <p
+                          className={`text-sm font-bold ${
+                            addTicketPago ? "text-green-400" : "text-zinc-400"
+                          }`}
+                        >
+                          Pagamento Confirmado
+                        </p>
+                        <p className="text-xs text-zinc-600 mt-0.5">
+                          {addTicketPago
+                            ? "Contabilizado na receita e em vendidos"
+                            : "Não contabilizado até confirmar"}
+                        </p>
+                      </div>
+                    </div>
+                    <div
+                      className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${
+                        addTicketPago ? "bg-green-500" : "bg-zinc-700"
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${
+                          addTicketPago ? "left-6" : "left-1"
+                        }`}
+                      />
+                    </div>
+                  </button>
+
+                  {/* Seleção de método de pagamento (só quando pago = true) */}
+                  {addTicketPago && (
+                    <div className="mt-3 p-4 rounded-xl border border-zinc-800 bg-black space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">
+                        Forma de Pagamento
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setAddTicketMetodoPagamento("dinheiro")}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                          addTicketMetodoPagamento === "dinheiro"
+                            ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400"
+                            : "border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                        }`}
+                      >
+                        <Banknote className="h-4 w-4" />
+                        Dinheiro
+                        {addTicketMetodoPagamento === "dinheiro" && (
+                          <span className="ml-auto text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                            Sem taxa
+                          </span>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-2 py-1">
+                        <div className="flex-1 h-px bg-zinc-800" />
+                        <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">
+                          ou
+                        </span>
+                        <div className="flex-1 h-px bg-zinc-800" />
+                      </div>
+                      <p className="text-[10px] text-zinc-600 text-center">
+                        Não clicou em Dinheiro? O pagamento será registrado como{" "}
+                        <span className="text-zinc-400 font-bold">PIX</span>{" "}
+                        (taxa de 0,99%).
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 <Button
                   className="w-full h-14"
                   onClick={handleGenerateTicket}
@@ -1968,88 +3182,115 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => (
                     <div
                       key={batch.id}
-                      className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl relative flex flex-col gap-4 hover:border-zinc-700 transition-colors"
+                      className={`group relative flex flex-col rounded-2xl border transition-all duration-200 overflow-hidden ${
+                        batch.visivel
+                          ? "bg-[#0a0a0a] border-zinc-800 hover:border-zinc-600"
+                          : "bg-[#0a0a0a] border-zinc-800/50 opacity-60 hover:opacity-80 hover:border-zinc-700"
+                      }`}
                     >
-                      <div className="flex justify-between items-start gap-4">
-                        <div>
-                          <h3 className="text-white font-bold text-lg leading-tight mb-2">
-                            {batch.nome}
-                          </h3>
-                          <span
-                            className={`inline-flex px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest ${
-                              batch.visivel
-                                ? "bg-green-500/10 text-green-400"
-                                : "bg-red-500/10 text-red-400"
-                            }`}
-                          >
-                            {batch.visivel
-                              ? "Ativo / Visível"
-                              : "Inativo / Oculto"}
-                          </span>
-                        </div>
-                        <p className="text-2xl font-black text-white shrink-0">
-                          R$ {Number(batch.preco).toFixed(2).replace(".", ",")}
-                        </p>
-                      </div>
+                      {/* Topo colorido sutil */}
+                      <div
+                        className={`h-0.5 w-full ${
+                          batch.visivel
+                            ? "bg-gradient-to-r from-white/20 to-transparent"
+                            : "bg-zinc-800"
+                        }`}
+                      />
 
-                      <div className="text-sm text-zinc-400 space-y-2 mt-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-zinc-500">
-                            Quantidade:
-                          </span>
-                          <span className="text-white font-mono">
-                            {batch.quantidade} Ingressos
-                          </span>
+                      <div className="p-5 flex flex-col gap-4 flex-1">
+                        {/* Header: nome + preço */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-semibold text-base leading-tight truncate">
+                              {batch.nome}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <div
+                                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                  batch.visivel ? "bg-green-400" : "bg-zinc-600"
+                                }`}
+                              />
+                              <span
+                                className={`text-[10px] font-bold uppercase tracking-widest ${
+                                  batch.visivel
+                                    ? "text-green-400"
+                                    : "text-zinc-600"
+                                }`}
+                              >
+                                {batch.visivel ? "Visível" : "Oculto"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-xl font-black text-white tabular-nums">
+                              R${" "}
+                              {Number(batch.preco).toFixed(2).replace(".", ",")}
+                            </p>
+                            <p className="text-[10px] text-zinc-600 mt-0.5">
+                              por ingresso
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-zinc-500">
-                            Público-alvo:
+
+                        {/* Pills de info */}
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
+                            <Ticket className="w-3 h-3" /> {batch.quantidade}{" "}
+                            ingressos
                           </span>
-                          <span className="text-white font-medium">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
+                            <User className="w-3 h-3" />{" "}
                             {batch.publico || "Ambos"}
                           </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-zinc-500">
-                            Data Limite:
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
+                            <GraduationCap className="w-3 h-3" />
+                            {!batch.turmasVisiveis ||
+                            batch.turmasVisiveis.length === 36
+                              ? "Todas as turmas"
+                              : batch.turmasVisiveis.length === 0
+                              ? "Nenhuma turma"
+                              : batch.turmasVisiveis.length <= 4
+                              ? batch.turmasVisiveis.join(", ")
+                              : `${batch.turmasVisiveis.length} turmas`}
                           </span>
-                          <span className="text-white font-medium text-xs">
-                            {batch.dataLimite
-                              ? formatDate(batch.dataLimite)
-                              : "Ilimitado"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="mt-auto pt-4 border-t border-zinc-800 flex items-center justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          className="h-10 px-4 text-xs"
-                          onClick={() => setBatchModal(batch)}
-                        >
-                          Editar Lote
-                        </Button>
-                        <button
-                          onClick={() => setConfirmVisibilityModal(batch)}
-                          className={`h-10 w-10 flex items-center justify-center rounded-xl border transition-colors ${
-                            batch.visivel
-                              ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"
-                              : "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20"
-                          }`}
-                          title={
-                            batch.visivel ? "Ocultar Lote" : "Tornar Visível"
-                          }
-                        >
-                          {batch.visivel ? (
-                            <IoEyeOutline size={18} />
-                          ) : (
-                            <AiOutlineEyeInvisible size={18} />
+                          {batch.dataLimite && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
+                              <Clock className="w-3 h-3" />{" "}
+                              {formatDate(batch.dataLimite)}
+                            </span>
                           )}
-                        </button>
+                        </div>
+
+                        {/* Ações */}
+                        <div className="flex items-center gap-2 pt-1 mt-auto">
+                          <button
+                            onClick={() => setBatchModal(batch)}
+                            className="flex-1 h-9 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 text-xs font-semibold hover:bg-zinc-800 hover:text-white hover:border-zinc-700 transition-all"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => setConfirmVisibilityModal(batch)}
+                            title={
+                              batch.visivel ? "Ocultar lote" : "Tornar visível"
+                            }
+                            className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-all shrink-0 ${
+                              batch.visivel
+                                ? "border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-white hover:border-zinc-600"
+                                : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            {batch.visivel ? (
+                              <IoEyeOutline size={15} />
+                            ) : (
+                              <AiOutlineEyeInvisible size={15} />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -2057,8 +3298,1492 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               )}
             </div>
           )}
+          {/* ── ALUNOS (sub-abas) ── */}
+          {activeTab === "admin_groups" && (
+            <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              {/* Sub-tab bar */}
+              <div className="flex gap-1 bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-1">
+                {(
+                  [
+                    { key: "import", label: "Importar Alunos", icon: FileUp },
+                    { key: "manual", label: "Cadastro Manual", icon: UserPlus },
+                    { key: "search", label: "Pesquisar Alunos", icon: Search },
+                    { key: "classes", label: "Turmas", icon: MdGroups },
+                  ] as {
+                    key: "import" | "manual" | "search" | "classes";
+                    label: string;
+                    icon: any;
+                  }[]
+                ).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setGroupsSubTab(key);
+                      if (key === "search") {
+                        setStudentSearch("");
+                        setStudentResults([]);
+                      }
+                      if (key === "classes") {
+                        setClassesYear(null);
+                        setClassesClass(null);
+                        setClassesWithStudents([]);
+                        fetchBatches();
+                      }
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-xl text-xs font-semibold transition-all ${
+                      groupsSubTab === key
+                        ? "bg-white text-black"
+                        : "text-zinc-500 hover:text-white"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* ── SUB-ABA: IMPORTAR ── */}
+              {groupsSubTab === "import" && (
+                <div className="space-y-6">
+                  <div>
+                    <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                      <MdGroups className="h-6 w-6 text-white" /> Importar
+                      Alunos
+                    </h1>
+                    <p className="text-zinc-400 text-sm mt-1">
+                      Importe uma ou mais planilhas .csv ou .xlsm com os alunos.
+                      Todos serão cadastrados no sistema automaticamente.
+                    </p>
+                  </div>
+
+                  {/* Card de instruções */}
+                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                    <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                    <div className="space-y-2 text-sm text-zinc-400">
+                      <p className="font-semibold text-white">
+                        Como preparar o arquivo:
+                      </p>
+                      <p>
+                        Salve a planilha como{" "}
+                        <span className="text-white font-semibold">.xlsx</span>{" "}
+                        (Excel) ou{" "}
+                        <span className="text-white font-semibold">.csv</span>.
+                        A primeira linha deve ser o cabeçalho com as colunas:
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {["ano", "turma", "nome", "cpf"].map((col) => (
+                          <span
+                            key={col}
+                            className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300"
+                          >
+                            {col}
+                          </span>
+                        ))}
+                      </div>
+                      <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
+                        <li>
+                          <span className="text-zinc-400">ano</span> — ano
+                          escolar (1, 2 ou 3)
+                        </li>
+                        <li>
+                          <span className="text-zinc-400">turma</span> — letra
+                          da turma (A até L)
+                        </li>
+                        <li>
+                          <span className="text-zinc-400">nome</span> — nome
+                          completo do aluno
+                        </li>
+                        <li>
+                          <span className="text-zinc-400">cpf</span> — CPF
+                          somente números (11 dígitos)
+                        </li>
+                      </ul>
+                      <p className="text-zinc-600 text-xs">
+                        Funciona com Excel (.xlsx) ou .csv. Múltiplas planilhas
+                        podem ser importadas ao mesmo tempo. Alunos com CPF já
+                        cadastrado são ignorados.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Zona de drag & drop */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setImportDragActive(true);
+                    }}
+                    onDragLeave={() => setImportDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setImportDragActive(false);
+                      if (e.dataTransfer.files.length > 0)
+                        handleImportFilesChange(e.dataTransfer.files);
+                    }}
+                    onClick={() => importFileRef.current?.click()}
+                    className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                      importDragActive
+                        ? "border-white bg-white/5"
+                        : importFiles.length > 0
+                        ? "border-zinc-600 bg-[#0a0a0a]"
+                        : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                    }`}
+                  >
+                    <input
+                      ref={importFileRef}
+                      type="file"
+                      accept=".csv,.xlsx"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0)
+                          handleImportFilesChange(e.target.files);
+                      }}
+                    />
+                    {importFiles.length > 0 ? (
+                      <>
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                          <FileSpreadsheet className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="text-center">
+                          {importFiles.length === 1 ? (
+                            <>
+                              <p className="text-white font-semibold text-sm">
+                                {importFiles[0].name}
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-1">
+                                {(importFiles[0].size / 1024).toFixed(1)} KB
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-white font-semibold text-sm">
+                                {importFiles.length} arquivos selecionados
+                              </p>
+                              <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
+                                {importFiles.map((f, i) => (
+                                  <p
+                                    key={i}
+                                    className="text-zinc-500 text-xs font-mono"
+                                  >
+                                    {f.name}{" "}
+                                    <span className="text-zinc-700">
+                                      ({(f.size / 1024).toFixed(1)} KB)
+                                    </span>
+                                  </p>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImportFiles([]);
+                            setImportPreview([]);
+                            setImportErrors([]);
+                            setImportResult(null);
+                            setImportTypeErrors([]);
+                          }}
+                          className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                        >
+                          Remover arquivo(s)
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                          <FileUp className="h-7 w-7 text-zinc-500" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-white font-semibold text-sm">
+                            Arraste os arquivos aqui
+                          </p>
+                          <p className="text-zinc-500 text-xs mt-1">
+                            ou clique para selecionar — somente .csv ou .xlsx
+                          </p>
+                          <p className="text-zinc-600 text-xs mt-0.5">
+                            Múltiplos arquivos permitidos
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Erros de tipo de arquivo */}
+                  {importTypeErrors.length > 0 && (
+                    <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle className="h-4 w-4 text-orange-400" />
+                        <p className="text-sm font-bold text-orange-400">
+                          Arquivo(s) não aceito(s)
+                        </p>
+                      </div>
+                      <ul className="space-y-1">
+                        {importTypeErrors.map((err, i) => (
+                          <li
+                            key={i}
+                            className="text-xs text-orange-300 font-mono"
+                          >
+                            {err}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-zinc-500 mt-3">
+                        Apenas arquivos{" "}
+                        <span className="text-zinc-300 font-semibold">
+                          .csv
+                        </span>{" "}
+                        e{" "}
+                        <span className="text-zinc-300 font-semibold">
+                          .xlsx
+                        </span>{" "}
+                        são suportados.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Preview dos dados */}
+                  {importPreview.length > 0 && (
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                        <p className="text-sm font-bold text-white">
+                          Pré-visualização
+                        </p>
+                        <span className="text-xs text-zinc-500">
+                          {importPreview.length} registros
+                        </span>
+                      </div>
+                      <div
+                        className="overflow-y-auto"
+                        style={{
+                          maxHeight: "480px",
+                          scrollbarWidth: "thin",
+                          scrollbarColor: "#3f3f46 transparent",
+                        }}
+                      >
+                        <table className="w-full text-sm border-collapse">
+                          <colgroup>
+                            <col style={{ width: "40px" }} />
+                            <col style={{ width: "64px" }} />
+                            <col style={{ width: "80px" }} />
+                            <col />
+                            <col style={{ width: "160px" }} />
+                            <col style={{ width: "44px" }} />
+                          </colgroup>
+                          <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                            <tr className="border-b border-zinc-800">
+                              <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                #
+                              </th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                Ano
+                              </th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                Turma
+                              </th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                Nome
+                              </th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                CPF
+                              </th>
+                              <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importPreview.map((row, i) => {
+                              const err = validateRow(row, row._row);
+                              return (
+                                <tr
+                                  key={i}
+                                  className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                    err ? "bg-red-500/5" : ""
+                                  }`}
+                                >
+                                  <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
+                                    {i + 1}
+                                  </td>
+                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                    {row.ano || "—"}
+                                  </td>
+                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                    {row.turma || "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                    {row.nome || "—"}
+                                  </td>
+                                  <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40 tabular-nums">
+                                    {row.cpf
+                                      ? `${row.cpf.slice(0, 3)}.${row.cpf.slice(
+                                          3,
+                                          6
+                                        )}.${row.cpf.slice(
+                                          6,
+                                          9
+                                        )}-${row.cpf.slice(9)}`
+                                      : "—"}
+                                  </td>
+                                  <td className="px-3 py-3 border-l border-zinc-800/40">
+                                    {err ? (
+                                      <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                    ) : (
+                                      <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Erros de validação */}
+                  {importErrors.length > 0 && (
+                    <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="h-4 w-4 text-red-400" />
+                        <p className="text-sm font-bold text-red-400">
+                          {importErrors.length} erro(s) encontrado(s)
+                        </p>
+                      </div>
+                      <ul className="space-y-1 max-h-32 overflow-y-auto">
+                        {importErrors.map((err, i) => (
+                          <li
+                            key={i}
+                            className="text-xs text-red-300 font-mono"
+                          >
+                            {err}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-zinc-500 mt-3">
+                        Corrija os erros no arquivo e reimporte para continuar.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Resultado da importação */}
+                  {importResult && (
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                          <CheckCircle className="h-4 w-4 text-zinc-300" />
+                        </div>
+                        <div>
+                          <p className="text-white font-semibold text-sm">
+                            Importação concluída
+                          </p>
+                          <p className="text-zinc-600 text-xs">
+                            Alunos cadastrados no Firebase
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-white tabular-nums">
+                            {importResult.success}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">
+                            Cadastrados
+                          </p>
+                        </div>
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                            {importResult.duplicates}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                            Duplicatas
+                          </p>
+                        </div>
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                            {importResult.failed}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                            Falhas
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setImportFiles([]);
+                          setImportPreview([]);
+                          setImportErrors([]);
+                          setImportResult(null);
+                          setImportTypeErrors([]);
+                        }}
+                        className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                      >
+                        Importar outra planilha
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Botão importar */}
+                  {importFiles.length > 0 &&
+                    importErrors.length === 0 &&
+                    !importResult && (
+                      <button
+                        onClick={handleImportSubmit}
+                        disabled={importLoading}
+                        className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                      >
+                        {importLoading ? (
+                          <>
+                            <Loader2 className="h-5 w-5 animate-spin" />{" "}
+                            Importando alunos...
+                          </>
+                        ) : (
+                          <>
+                            <FileUp className="h-5 w-5" /> Importar{" "}
+                            {importFiles.length > 1
+                              ? `${importFiles.length} Planilhas`
+                              : "Alunos"}
+                          </>
+                        )}
+                      </button>
+                    )}
+                </div>
+              )}
+
+              {/* ── SUB-ABA: CADASTRO MANUAL ── */}
+              {groupsSubTab === "manual" && (
+                <div className="space-y-6">
+                  <div>
+                    <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                      <UserPlus className="h-6 w-6 text-white" /> Cadastro
+                      Manual
+                    </h1>
+                    <p className="text-zinc-400 text-sm mt-1">
+                      Cadastre um aluno manualmente inserindo os dados abaixo.
+                    </p>
+                  </div>
+
+                  {/* Feedback da última sala cadastrada */}
+                  {manualSuccessSala && (
+                    <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 flex items-center gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                      <p className="text-emerald-300 text-sm">
+                        Aluno associado à sala{" "}
+                        <span className="font-bold">{manualSuccessSala}</span>.
+                        Você pode cadastrar outro abaixo.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                    {/* Preview da sala */}
+                    {manualForm.ano && manualForm.turma && (
+                      <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center gap-2">
+                        <MdGroups className="h-4 w-4 text-zinc-400" />
+                        <span className="text-zinc-400 text-sm">
+                          Será associado à sala{" "}
+                          <span className="text-white font-bold">
+                            {manualForm.ano}
+                            {manualForm.turma}
+                          </span>
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="p-5 space-y-4">
+                      {/* Nome */}
+                      <div className="space-y-1.5">
+                        <Label>
+                          Nome do Aluno <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          name="nomeAluno"
+                          value={manualForm.nomeAluno}
+                          onChange={handleManualFormChange}
+                          placeholder="Nome completo do aluno"
+                          error={!!manualErrors.nomeAluno}
+                        />
+                        {manualErrors.nomeAluno && (
+                          <p className="text-red-400 text-xs flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            {manualErrors.nomeAluno}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Ano + Turma */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>
+                            Ano <span className="text-red-500">*</span>
+                          </Label>
+                          <select
+                            name="ano"
+                            value={manualForm.ano}
+                            onChange={handleManualFormChange}
+                            className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
+                              manualErrors.ano
+                                ? "border-red-500 bg-red-500/10 text-red-100"
+                                : "border-zinc-800"
+                            }`}
+                          >
+                            <option value="">Selecione</option>
+                            {["1", "2", "3"].map((a) => (
+                              <option key={a} value={a}>
+                                {a}º Ano
+                              </option>
+                            ))}
+                          </select>
+                          {manualErrors.ano && (
+                            <p className="text-red-400 text-xs flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3 shrink-0" />
+                              {manualErrors.ano}
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>
+                            Turma <span className="text-red-500">*</span>
+                          </Label>
+                          <select
+                            name="turma"
+                            value={manualForm.turma}
+                            onChange={handleManualFormChange}
+                            className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
+                              manualErrors.turma
+                                ? "border-red-500 bg-red-500/10 text-red-100"
+                                : "border-zinc-800"
+                            }`}
+                          >
+                            <option value="">Selecione</option>
+                            {Array.from({ length: 12 }, (_, i) =>
+                              String.fromCharCode(65 + i)
+                            ).map((t) => (
+                              <option key={t} value={t}>
+                                Turma {t}
+                              </option>
+                            ))}
+                          </select>
+                          {manualErrors.turma && (
+                            <p className="text-red-400 text-xs flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3 shrink-0" />
+                              {manualErrors.turma}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* CPF */}
+                      <div className="space-y-1.5">
+                        <Label>
+                          CPF <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          name="cpf"
+                          value={manualForm.cpf}
+                          onChange={handleManualFormChange}
+                          placeholder="000.000.000-00"
+                          inputMode="numeric"
+                          error={!!manualErrors.cpf}
+                        />
+                        {manualErrors.cpf && (
+                          <p className="text-red-400 text-xs flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            {manualErrors.cpf}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Divisor opcional */}
+                      <div className="flex items-center gap-3 py-1">
+                        <div className="flex-1 h-px bg-zinc-800" />
+                        <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
+                          Opcional
+                        </span>
+                        <div className="flex-1 h-px bg-zinc-800" />
+                      </div>
+
+                      {/* E-mail */}
+                      <div className="space-y-1.5">
+                        <Label>E-mail</Label>
+                        <Input
+                          name="email"
+                          value={manualForm.email}
+                          onChange={handleManualFormChange}
+                          placeholder="aluno@email.com"
+                          type="email"
+                          error={!!manualErrors.email}
+                        />
+                        {manualErrors.email && (
+                          <p className="text-red-400 text-xs flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            {manualErrors.email}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Telefone */}
+                      <div className="space-y-1.5">
+                        <Label>Telefone</Label>
+                        <Input
+                          name="telefone"
+                          value={manualForm.telefone}
+                          onChange={handleManualFormChange}
+                          placeholder="(31) 99999-9999"
+                          inputMode="numeric"
+                          error={!!manualErrors.telefone}
+                        />
+                        {manualErrors.telefone && (
+                          <p className="text-red-400 text-xs flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            {manualErrors.telefone}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Botão salvar */}
+                    <div className="px-5 pb-5">
+                      <Button
+                        className="w-full h-14"
+                        onClick={handleManualCadastro}
+                        isLoading={manualLoading}
+                        disabled={manualLoading}
+                      >
+                        <UserPlus className="h-5 w-5" />
+                        {manualLoading ? "Salvando..." : "Cadastrar Aluno"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── SUB-ABA: PESQUISAR ALUNOS ── */}
+              {groupsSubTab === "search" && (
+                <div className="space-y-5">
+                  <div>
+                    <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                      <Search className="h-6 w-6 text-white" /> Pesquisar Alunos
+                    </h1>
+                    <p className="text-zinc-400 text-sm mt-1">
+                      Busque por nome em todas as turmas cadastradas.
+                    </p>
+                  </div>
+
+                  {/* Campo de busca */}
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Digite o nome do aluno..."
+                      value={studentSearch}
+                      onChange={(e) => {
+                        setStudentSearch(e.target.value);
+                        searchStudents(e.target.value);
+                      }}
+                      className="w-full h-12 pl-11 pr-4 rounded-xl bg-[#0a0a0a] border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                    />
+                    {studentSearchLoading && (
+                      <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                    )}
+                  </div>
+
+                  {/* Resultados */}
+                  {studentSearch.length >= 2 && !studentSearchLoading && (
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                      {studentResults.length === 0 ? (
+                        <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
+                          <Search className="h-8 w-8 opacity-30" />
+                          <p className="text-sm">
+                            Nenhum aluno encontrado para "{studentSearch}"
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Resultados
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {studentResults.length} aluno(s)
+                            </span>
+                          </div>
+                          <div className="divide-y divide-zinc-800/50">
+                            {studentResults.map((aluno, i) => (
+                              <button
+                                key={i}
+                                onClick={() =>
+                                  openStudentModal(aluno, aluno.turmaId)
+                                }
+                                className="w-full flex items-center justify-between px-5 py-4 hover:bg-zinc-900/40 transition-colors text-left"
+                              >
+                                <div>
+                                  <p className="text-white font-semibold text-sm">
+                                    {aluno.nome}
+                                  </p>
+                                  <p className="text-zinc-500 text-xs mt-0.5 font-mono">
+                                    {formatCpf(aluno.cpf)}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-bold text-zinc-300">
+                                    {aluno.ano}º ano · Turma {aluno.turma}
+                                  </span>
+                                  <ChevronRight className="h-4 w-4 text-zinc-600" />
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {studentSearch.length < 2 && studentSearch.length > 0 && (
+                    <p className="text-zinc-600 text-xs text-center">
+                      Digite pelo menos 2 letras para pesquisar.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ── SUB-ABA: TURMAS ── */}
+              {groupsSubTab === "classes" && (
+                <div className="space-y-5">
+                  {/* Breadcrumb */}
+                  <div className="flex items-center gap-2 text-sm">
+                    <button
+                      onClick={() => {
+                        setClassesYear(null);
+                        setClassesClass(null);
+                        setClassesWithStudents([]);
+                      }}
+                      className={`font-semibold transition-colors ${
+                        !classesYear
+                          ? "text-white"
+                          : "text-zinc-500 hover:text-white"
+                      }`}
+                    >
+                      Turmas
+                    </button>
+                    {classesYear && (
+                      <>
+                        <ChevronRight className="h-4 w-4 text-zinc-700" />
+                        <button
+                          onClick={() => setClassesClass(null)}
+                          className={`font-semibold transition-colors ${
+                            !classesClass
+                              ? "text-white"
+                              : "text-zinc-500 hover:text-white"
+                          }`}
+                        >
+                          {classesYear}º Ano
+                        </button>
+                      </>
+                    )}
+                    {classesClass && (
+                      <>
+                        <ChevronRight className="h-4 w-4 text-zinc-700" />
+                        <span className="text-white font-semibold">
+                          Turma {classesClass}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Nível 1: Selecionar Ano */}
+                  {!classesYear && (
+                    <div className="grid grid-cols-3 gap-4">
+                      {["1", "2", "3"].map((ano) => (
+                        <button
+                          key={ano}
+                          onClick={() => {
+                            setClassesYear(ano);
+                            fetchClassesWithStudents(ano);
+                          }}
+                          className="group bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 flex flex-col items-center gap-3 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all"
+                        >
+                          <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 group-hover:border-zinc-700 flex items-center justify-center transition-all">
+                            <span className="text-2xl font-black text-white">
+                              {ano}
+                            </span>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-white font-bold text-sm">
+                              {ano}º Ano
+                            </p>
+                            <p className="text-zinc-600 text-xs mt-0.5">
+                              12 turmas
+                            </p>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-zinc-700 group-hover:text-zinc-400 transition-colors" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Nível 2: Turmas do Ano (só as que têm alunos) */}
+                  {classesYear && !classesClass && (
+                    <div className="space-y-3">
+                      <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">
+                        Turmas do {classesYear}º Ano
+                      </p>
+                      {classesWithStudentsLoading ? (
+                        <div className="flex items-center justify-center py-16">
+                          <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                        </div>
+                      ) : classesWithStudents.filter((id) =>
+                          id.startsWith(classesYear)
+                        ).length === 0 ? (
+                        <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
+                          <MdGroups className="h-10 w-10 opacity-20" />
+                          <p className="text-sm">
+                            Nenhuma turma com alunos cadastrados no{" "}
+                            {classesYear}º ano.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                          {classesWithStudents
+                            .filter((id) => id.startsWith(classesYear))
+                            .map((turmaId) => {
+                              const letra = turmaId.slice(1);
+                              return (
+                                <button
+                                  key={turmaId}
+                                  onClick={() => {
+                                    setClassesClass(letra);
+                                    fetchClassStudents(turmaId);
+                                  }}
+                                  className="group bg-[#0a0a0a] border border-zinc-800 rounded-xl p-4 flex flex-col items-center gap-2 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all"
+                                >
+                                  <span className="text-xl font-black text-white">
+                                    {letra}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-wider">
+                                    Turma
+                                  </span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Nível 3: Lista de Alunos da Turma */}
+                  {classesYear &&
+                    classesClass &&
+                    (() => {
+                      const turmaId = `${classesYear}${classesClass}`;
+                      const alunos = classesData[turmaId];
+                      return (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <div>
+                              <p className="text-white font-bold text-sm">
+                                {classesYear}º Ano — Turma {classesClass}
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-0.5">
+                                {alunos
+                                  ? `${alunos.length} aluno(s) cadastrado(s)`
+                                  : "Carregando..."}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {classesLoading && (
+                                <Loader2 className="h-4 w-4 text-zinc-500 animate-spin" />
+                              )}
+                              {alunos && alunos.length > 0 && (
+                                <button
+                                  onClick={() => setConfirmDeleteClass(turmaId)}
+                                  className="h-9 w-9 flex items-center justify-center rounded-xl border border-zinc-800 text-zinc-600 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all"
+                                  title="Apagar turma"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {!alunos || classesLoading ? (
+                            <div className="py-16 flex items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                            </div>
+                          ) : alunos.length === 0 ? (
+                            <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
+                              <MdGroups className="h-10 w-10 opacity-20" />
+                              <p className="text-sm">
+                                Nenhum aluno cadastrado nesta turma.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-zinc-800/50">
+                              {/* Header da tabela */}
+                              <div className="grid grid-cols-[32px_1fr_150px_40px] gap-0 px-5 py-3 bg-zinc-900/30">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                  #
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                  Nome
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                  CPF
+                                </span>
+                                <span></span>
+                              </div>
+                              {alunos.map((aluno, i) => {
+                                const cpfDigits = (aluno.cpf || "").replace(
+                                  /\D/g,
+                                  ""
+                                );
+                                const hasTicket = allTickets.some(
+                                  (t) =>
+                                    (t.cpf || "").replace(/\D/g, "") ===
+                                      cpfDigits ||
+                                    (usersMap[t.userId] || "").replace(
+                                      /\D/g,
+                                      ""
+                                    ) === cpfDigits
+                                );
+                                return (
+                                  <div
+                                    key={aluno.id || i}
+                                    className="grid grid-cols-[32px_1fr_150px_40px] items-center px-5 py-3.5 hover:bg-zinc-900/30 transition-colors"
+                                  >
+                                    <span className="text-[11px] font-mono text-zinc-600 tabular-nums">
+                                      {i + 1}
+                                    </span>
+                                    <div className="min-w-0 pr-3">
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-white font-medium text-sm truncate">
+                                          {aluno.nome}
+                                        </p>
+                                        {hasTicket && (
+                                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-[9px] font-bold text-green-400 uppercase tracking-wider">
+                                            ingresso
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="text-zinc-500 font-mono text-xs tabular-nums">
+                                      {formatCpf(aluno.cpf)}
+                                    </span>
+                                    <div className="flex justify-end">
+                                      <button
+                                        onClick={() =>
+                                          openStudentModal(
+                                            aluno,
+                                            `${classesYear}${classesClass}`
+                                          )
+                                        }
+                                        className="w-8 h-8 flex items-center justify-center rounded-full text-zinc-600 hover:text-white hover:bg-zinc-800 transition-all"
+                                        title="Ver detalhes"
+                                      >
+                                        <Info className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
+
+      {/* ── MODAL CONFIRMAR EXCLUSÃO DE TURMA ── */}
+      {confirmDeleteClass && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => !deleteClassLoading && setConfirmDeleteClass(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-sm shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="h-5 w-5 text-red-400" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-base">
+                  Apagar turma {confirmDeleteClass}?
+                </p>
+                <p className="text-zinc-500 text-sm mt-1">
+                  Todos os alunos desta turma serão removidos do sistema
+                  permanentemente. Esta ação não pode ser desfeita.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDeleteClass(null)}
+                disabled={deleteClassLoading}
+                className="flex-1 h-11 rounded-xl border border-zinc-800 text-zinc-400 text-sm font-semibold hover:bg-zinc-900 hover:text-white transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleDeleteClass(confirmDeleteClass)}
+                disabled={deleteClassLoading}
+                className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {deleteClassLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Apagar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DO ALUNO ── */}
+      {studentModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setStudentModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl max-h-[92vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                  <User className="h-5 w-5 text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">
+                    {studentModal.nome}
+                  </p>
+                  <p className="text-zinc-500 text-xs mt-0.5">
+                    {studentModal.ano}º Ano · Turma {studentModal.turma}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setConfirmDeleteStudent(true)}
+                  className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-full transition-colors"
+                  title="Excluir aluno"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setStudentModal(null)}
+                  className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+              {studentModalLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Dados cadastrais */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Dados Cadastrais
+                    </p>
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                      {[
+                        { label: "CPF", value: formatCpf(studentModal.cpf) },
+                        {
+                          label: "E-mail",
+                          value: studentModal._userData?.email || null,
+                        },
+                        {
+                          label: "Telefone",
+                          value:
+                            studentModal._userData?.telefone ||
+                            studentModal._userData?.phone ||
+                            null,
+                        },
+                        {
+                          label: "Importado em",
+                          value: studentModal.cadastradoEm
+                            ? new Date(
+                                studentModal.cadastradoEm
+                              ).toLocaleDateString("pt-BR")
+                            : null,
+                        },
+                      ].map(({ label, value }) => (
+                        <div
+                          key={label}
+                          className="flex items-center justify-between px-4 py-3"
+                        >
+                          <span className="text-zinc-500 text-xs font-semibold">
+                            {label}
+                          </span>
+                          <span
+                            className={`text-xs font-mono ${
+                              value ? "text-white" : "text-zinc-700 italic"
+                            }`}
+                          >
+                            {value || "não informado"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Status de login */}
+                    <div
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold ${
+                        studentModal._userData
+                          ? "bg-green-500/5 border-green-500/20 text-green-400"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-500"
+                      }`}
+                    >
+                      {studentModal._userData ? (
+                        <>
+                          <CheckCircle className="h-3.5 w-3.5" /> Aluno já
+                          realizou login no sistema
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-3.5 w-3.5" /> Aluno ainda
+                          não fez login
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Seção de Ingresso */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Ingresso
+                    </p>
+
+                    {studentModalTicket ? (
+                      /* Ingresso existente */
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
+                        {/* Status badge */}
+                        <div
+                          className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${
+                            studentModalTicket.usado
+                              ? "bg-green-500/5"
+                              : "bg-zinc-900/30"
+                          }`}
+                        >
+                          {studentModalTicket.usado ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />
+                              <span className="text-green-400 text-xs font-bold">
+                                Validado — entrada confirmada
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="h-4 w-4 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-400 text-xs font-bold">
+                                Pendente de validação
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {/* Dados do ingresso */}
+                        <div className="divide-y divide-zinc-800/60">
+                          {[
+                            { label: "Código", value: studentModalTicket.code },
+                            { label: "Lote", value: studentModalTicket.type },
+                            {
+                              label: "Valor",
+                              value:
+                                studentModalTicket.price != null
+                                  ? `R$ ${Number(studentModalTicket.price)
+                                      .toFixed(2)
+                                      .replace(".", ",")}`
+                                  : null,
+                            },
+                            {
+                              label: "Pagamento",
+                              value: studentModalTicket.pagamentoConfirmado
+                                ? `Confirmado${
+                                    studentModalTicket.metodoPagamento
+                                      ? " · " +
+                                        studentModalTicket.metodoPagamento
+                                      : ""
+                                  }`
+                                : "Pendente",
+                            },
+                            {
+                              label: "Emitido em",
+                              value: studentModalTicket.criadoEm
+                                ? formatDate(studentModalTicket.criadoEm)
+                                : null,
+                            },
+                            {
+                              label: "Entrada em",
+                              value:
+                                studentModalTicket.usado &&
+                                studentModalTicket.horaEntrada
+                                  ? formatDate(studentModalTicket.horaEntrada)
+                                  : null,
+                            },
+                          ]
+                            .filter(({ value }) => value)
+                            .map(({ label, value }) => (
+                              <div
+                                key={label}
+                                className="flex items-center justify-between px-4 py-2.5"
+                              >
+                                <span className="text-zinc-500 text-xs font-semibold">
+                                  {label}
+                                </span>
+                                <span className="text-white text-xs font-mono">
+                                  {value}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                        {/* Ações */}
+                        <div className="flex gap-2 p-4 border-t border-zinc-800">
+                          <button
+                            onClick={handleToggleValidarModal}
+                            disabled={studentModalLoading}
+                            className={`flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+                              studentModalTicket.usado
+                                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700"
+                                : "bg-white text-black hover:bg-zinc-200"
+                            }`}
+                          >
+                            {studentModalTicket.usado ? (
+                              <>
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                  <path d="M3 3v5h5" />
+                                </svg>{" "}
+                                Desvalidar
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="h-3.5 w-3.5" /> Validar
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={handleExcluirIngressoModal}
+                            disabled={studentModalLoading}
+                            className="h-10 w-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition-all disabled:opacity-50 shrink-0"
+                            title="Excluir ingresso"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Sem ingresso — form para associar */
+                      <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-4 space-y-4">
+                        <p className="text-zinc-500 text-xs">
+                          Este aluno ainda não possui ingresso. Associe um
+                          agora:
+                        </p>
+
+                        {/* Lote */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Lote
+                          </label>
+                          <select
+                            value={associarForm.loteId}
+                            onChange={(e) =>
+                              setAssociarForm((p) => ({
+                                ...p,
+                                loteId: e.target.value,
+                              }))
+                            }
+                            className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
+                          >
+                            <option value="" disabled>
+                              Selecione o lote
+                            </option>
+                            {batches.map((b) => (
+                              <option
+                                key={b.id}
+                                value={b.id}
+                                className="bg-zinc-900"
+                              >
+                                {b.nome} — R${" "}
+                                {Number(b.preco).toFixed(2).replace(".", ",")}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* E-mail (opcional se já tiver do login) */}
+                        {!studentModal._userData?.email && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              E-mail (opcional)
+                            </label>
+                            <input
+                              type="email"
+                              placeholder="email@exemplo.com"
+                              value={associarForm.email}
+                              onChange={(e) =>
+                                setAssociarForm((p) => ({
+                                  ...p,
+                                  email: e.target.value,
+                                }))
+                              }
+                              className="flex h-11 w-full rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                            />
+                          </div>
+                        )}
+
+                        {/* Status + Pagamento */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Status
+                            </label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {(["pendente", "validado"] as const).map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarForm((p) => ({
+                                      ...p,
+                                      status: s,
+                                    }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${
+                                    associarForm.status === s
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Pagamento
+                            </label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {([false, true] as const).map((v) => (
+                                <button
+                                  key={String(v)}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarForm((p) => ({ ...p, pago: v }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${
+                                    associarForm.pago === v
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
+                                >
+                                  {v ? "Pago" : "Pendente"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            fetchBatches();
+                            handleAssociarIngresso();
+                          }}
+                          disabled={!associarForm.loteId || associarLoading}
+                          className="w-full h-11 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
+                        >
+                          {associarLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <LuTicketPlus className="h-4 w-4" />
+                          )}
+                          Associar Ingresso
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── POP DE CONFIRMAÇÃO: EXCLUIR ALUNO ── */}
+      {confirmDeleteStudent && studentModal && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setConfirmDeleteStudent(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl max-w-sm w-full flex flex-col items-center text-center shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
+              <Trash2 className="h-7 w-7" />
+            </div>
+            <h4 className="text-white font-bold text-lg mb-1">
+              Excluir aluno?
+            </h4>
+            <p className="text-zinc-500 text-sm mb-1">
+              <span className="text-white font-semibold">
+                {studentModal.nome}
+              </span>
+            </p>
+            <p className="text-zinc-600 text-xs mb-6">
+              Esta ação é irreversível. O aluno será removido da turma{" "}
+              <span className="text-zinc-400 font-semibold">
+                {studentModal.turmaId}
+              </span>
+              .
+            </p>
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => setConfirmDeleteStudent(false)}
+                disabled={deleteStudentLoading}
+                className="flex-1 h-11 rounded-xl bg-transparent border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteStudent}
+                disabled={deleteStudentLoading}
+                className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {deleteStudentLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAIS GLOBAIS ── */}
 
@@ -2090,7 +4815,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 Cancelar
               </Button>
               <button
-                onClick={onLogout}
+                onClick={() => {
+                  setConfirmLogoutModal(false);
+                  onLogout && onLogout();
+                }}
                 className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors"
               >
                 Sair
@@ -2107,7 +4835,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           onClick={() => setBatchModal(null)}
         >
           <div
-            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-lg relative shadow-2xl flex flex-col animate-in zoom-in-95 duration-200"
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-lg relative shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 sm:p-8 border-b border-zinc-800 flex justify-between items-center">
@@ -2122,7 +4850,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleSaveBatch} className="p-6 sm:p-8 space-y-5">
+            <form
+              onSubmit={handleSaveBatch}
+              className="p-6 sm:p-8 space-y-5 overflow-y-auto"
+            >
               <div>
                 <Label>Nome do lote</Label>
                 <Input
@@ -2190,6 +4921,244 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   <option value="Pais/Responsáveis">Pais / Responsáveis</option>
                   <option value="Ambos">Ambos (Todos)</option>
                 </select>
+              </div>
+
+              {/* ── Visibilidade por Turma ── */}
+              <div className="border border-zinc-800 rounded-xl overflow-hidden">
+                {/* Cabeçalho colapsável */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBatchModal({
+                      ...batchModal,
+                      _turmasOpen: !batchModal._turmasOpen,
+                    })
+                  }
+                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-zinc-900 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-2 h-2 rounded-full ${
+                        !batchModal.turmasVisiveis ||
+                        batchModal.turmasVisiveis.length === 36
+                          ? "bg-green-400"
+                          : batchModal.turmasVisiveis.length === 0
+                          ? "bg-red-400"
+                          : "bg-yellow-400"
+                      }`}
+                    />
+                    <span className="text-sm font-semibold text-white">
+                      Visibilidade por Turma
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-500">
+                      {!batchModal.turmasVisiveis ||
+                      batchModal.turmasVisiveis.length === 36
+                        ? "Todas as turmas"
+                        : batchModal.turmasVisiveis.length === 0
+                        ? "Nenhuma turma"
+                        : `${batchModal.turmasVisiveis.length} de 36 turmas`}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${
+                        batchModal._turmasOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </div>
+                </button>
+
+                {/* Painel expandido */}
+                {batchModal._turmasOpen && (
+                  <div className="border-t border-zinc-800 bg-black">
+                    {/* Barra de ação rápida */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/60">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                        Selecionar
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const todas = [1, 2, 3].flatMap((ano) =>
+                              Array.from(
+                                { length: 12 },
+                                (_, i) => `${ano}${String.fromCharCode(65 + i)}`
+                              )
+                            );
+                            setBatchModal({
+                              ...batchModal,
+                              turmasVisiveis: todas,
+                              _turmasOpen: true,
+                            });
+                          }}
+                          className="px-3 py-1 rounded-lg text-[10px] font-bold bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                        >
+                          Todas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBatchModal({
+                              ...batchModal,
+                              turmasVisiveis: [],
+                              _turmasOpen: true,
+                            })
+                          }
+                          className="px-3 py-1 rounded-lg text-[10px] font-bold bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                        >
+                          Nenhuma
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Grade por ano */}
+                    <div className="p-4 space-y-5">
+                      {[1, 2, 3].map((ano) => {
+                        const turmasDoAno = Array.from(
+                          { length: 12 },
+                          (_, i) => `${ano}${String.fromCharCode(65 + i)}`
+                        );
+                        const selecionadas = batchModal.turmasVisiveis;
+                        const todasAsTurmas = [1, 2, 3].flatMap((a) =>
+                          Array.from(
+                            { length: 12 },
+                            (_, i) => `${a}${String.fromCharCode(65 + i)}`
+                          )
+                        );
+                        const todasMarcadas =
+                          !selecionadas || selecionadas.length === 36;
+                        const anoMarcadas = turmasDoAno.filter(
+                          (t) =>
+                            todasMarcadas || (selecionadas || []).includes(t)
+                        );
+                        const todoAnoMarcado = anoMarcadas.length === 12;
+                        const parcialAno =
+                          anoMarcadas.length > 0 && anoMarcadas.length < 12;
+
+                        const toggleAno = () => {
+                          const base = todasMarcadas
+                            ? [...todasAsTurmas]
+                            : [...(selecionadas || [])];
+                          if (todoAnoMarcado) {
+                            setBatchModal({
+                              ...batchModal,
+                              turmasVisiveis: base.filter(
+                                (t) => !turmasDoAno.includes(t)
+                              ),
+                              _turmasOpen: true,
+                            });
+                          } else {
+                            setBatchModal({
+                              ...batchModal,
+                              turmasVisiveis: [
+                                ...new Set([...base, ...turmasDoAno]),
+                              ],
+                              _turmasOpen: true,
+                            });
+                          }
+                        };
+
+                        const toggleTurma = (turma) => {
+                          const base = todasMarcadas
+                            ? [...todasAsTurmas]
+                            : [...(selecionadas || [])];
+                          const incluida = base.includes(turma);
+                          setBatchModal({
+                            ...batchModal,
+                            turmasVisiveis: incluida
+                              ? base.filter((t) => t !== turma)
+                              : [...base, turma],
+                            _turmasOpen: true,
+                          });
+                        };
+
+                        return (
+                          <div key={ano}>
+                            {/* Header do ano com toggle */}
+                            <div className="flex items-center justify-between mb-2.5">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={toggleAno}
+                                  className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                                    todoAnoMarcado
+                                      ? "bg-white border-white"
+                                      : parcialAno
+                                      ? "bg-zinc-700 border-zinc-600"
+                                      : "border-zinc-700 bg-transparent hover:border-zinc-500"
+                                  }`}
+                                >
+                                  {todoAnoMarcado && (
+                                    <svg
+                                      viewBox="0 0 10 10"
+                                      className="w-3 h-3"
+                                    >
+                                      <path
+                                        d="M1.5 5L4 7.5L8.5 2.5"
+                                        stroke="black"
+                                        strokeWidth="2"
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  )}
+                                  {parcialAno && (
+                                    <svg
+                                      viewBox="0 0 10 10"
+                                      className="w-3 h-3"
+                                    >
+                                      <path
+                                        d="M2 5H8"
+                                        stroke="white"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                      />
+                                    </svg>
+                                  )}
+                                </button>
+                                <span className="text-xs font-bold text-zinc-200 tracking-wide">
+                                  {ano}º Ano
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-zinc-600 font-medium">
+                                {anoMarcadas.length}/12
+                              </span>
+                            </div>
+
+                            {/* Turmas */}
+                            <div className="grid grid-cols-6 gap-1.5">
+                              {turmasDoAno.map((turma) => {
+                                const marcada =
+                                  todasMarcadas ||
+                                  (selecionadas || []).includes(turma);
+                                return (
+                                  <button
+                                    key={turma}
+                                    type="button"
+                                    onClick={() => toggleTurma(turma)}
+                                    className={`h-9 rounded-lg text-xs font-bold transition-all ${
+                                      marcada
+                                        ? "bg-white text-black shadow-sm"
+                                        : "bg-zinc-900 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800"
+                                    }`}
+                                  >
+                                    {turma.slice(1)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="px-4 pb-3 text-[10px] text-zinc-600">
+                      Turmas marcadas enxergam este lote na hora da compra.
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="pt-4 flex gap-3">
                 <Button
@@ -2404,7 +5373,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 }`}
               >
                 {infoModalTicket.usado ? (
-                  <CheckCircle2 className="h-3 w-3" />
+                  <LuTicketCheck className="h-3 w-3" />
                 ) : (
                   <Clock className="h-3 w-3" />
                 )}
@@ -2445,6 +5414,23 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 </div>
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                    Pagamento
+                  </p>
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${
+                      infoModalTicket.pagamentoConfirmado
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : "bg-yellow-500/10 text-yellow-500"
+                    }`}
+                  >
+                    <Banknote className="h-3 w-3" />
+                    {infoModalTicket.pagamentoConfirmado
+                      ? `Pago · ${formatDate(infoModalTicket.dataPagamento)}`
+                      : "Não pago"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
                     Validado em
                   </p>
                   <p className="text-white font-mono text-xs">
@@ -2457,6 +5443,106 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             </div>
 
             <div className="p-6 pt-0 space-y-3">
+              {/* Botão confirmar/cancelar pagamento */}
+              {!infoModalTicket.pagamentoConfirmado ? (
+                <button
+                  onClick={async () => {
+                    setAdminLoading(true);
+                    try {
+                      const agora = new Date().toISOString();
+                      await updateDoc(
+                        doc(db, "ingressos", infoModalTicket.id),
+                        {
+                          pagamentoConfirmado: true,
+                          dataPagamento: agora,
+                        }
+                      );
+                      setAllTickets((prev) =>
+                        prev.map((t) =>
+                          t.id === infoModalTicket.id
+                            ? {
+                                ...t,
+                                pagamentoConfirmado: true,
+                                dataPagamento: agora,
+                              }
+                            : t
+                        )
+                      );
+                      setInfoModalTicket((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              pagamentoConfirmado: true,
+                              dataPagamento: agora,
+                            }
+                          : prev
+                      );
+                      showToast("Pagamento confirmado!", "success");
+                    } catch {
+                      showToast("Erro ao confirmar pagamento.");
+                    }
+                    setAdminLoading(false);
+                  }}
+                  disabled={adminLoading}
+                  className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500/30 text-sm font-bold transition-colors disabled:opacity-50"
+                >
+                  {adminLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Banknote className="h-4 w-4" />
+                  )}
+                  Confirmar Pagamento
+                </button>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setAdminLoading(true);
+                    try {
+                      await updateDoc(
+                        doc(db, "ingressos", infoModalTicket.id),
+                        {
+                          pagamentoConfirmado: false,
+                          dataPagamento: null,
+                        }
+                      );
+                      setAllTickets((prev) =>
+                        prev.map((t) =>
+                          t.id === infoModalTicket.id
+                            ? {
+                                ...t,
+                                pagamentoConfirmado: false,
+                                dataPagamento: null,
+                              }
+                            : t
+                        )
+                      );
+                      setInfoModalTicket((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              pagamentoConfirmado: false,
+                              dataPagamento: null,
+                            }
+                          : prev
+                      );
+                      showToast("Pagamento removido.", "success");
+                    } catch {
+                      showToast("Erro ao remover pagamento.");
+                    }
+                    setAdminLoading(false);
+                  }}
+                  disabled={adminLoading}
+                  className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:bg-zinc-800 text-sm font-bold transition-colors disabled:opacity-50"
+                >
+                  {adminLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Banknote className="h-4 w-4" />
+                  )}
+                  Remover Pagamento
+                </button>
+              )}
+
               {!infoModalTicket.usado && (
                 <button
                   onClick={async () => {
@@ -2477,7 +5563,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   {adminLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <CheckCircle2 className="h-4 w-4" />
+                    <LuTicketCheck className="h-4 w-4" />
                   )}
                   Validar Ingresso
                 </button>
@@ -2666,6 +5752,209 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           </div>
         </div>
       )}
+
+      {/* ── MODAL DE RECEITA DETALHADA ── */}
+      {revenueModalOpen &&
+        (() => {
+          const pagos = allTickets.filter((t) => t.pagamentoConfirmado);
+
+          const ticketsPix = pagos.filter(
+            (t) => !t.metodoPagamento || t.metodoPagamento === "pix"
+          );
+          const ticketsCartao = pagos.filter(
+            (t) => t.metodoPagamento === "cartao"
+          );
+          const ticketsDinheiro = pagos.filter(
+            (t) => t.metodoPagamento === "dinheiro"
+          );
+
+          const somarBruto = (arr) =>
+            arr.reduce((s, t) => s + (t.price || 0), 0);
+
+          const TAXA_PIX = 0.0099;
+          const TAXA_CARTAO = 0.0498;
+
+          const brutoPix = somarBruto(ticketsPix);
+          const brutoCartao = somarBruto(ticketsCartao);
+          const brutoDinheiro = somarBruto(ticketsDinheiro);
+
+          const taxaPix = brutoPix * TAXA_PIX;
+          const taxaCartao = brutoCartao * TAXA_CARTAO;
+
+          const totalBruto = brutoPix + brutoCartao + brutoDinheiro;
+          const totalTaxas = taxaPix + taxaCartao;
+          const totalLiquido = totalBruto - totalTaxas;
+
+          const fmt = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
+
+          const metodos = [
+            {
+              label: "PIX",
+              taxa: "0,99%",
+              qtd: ticketsPix.length,
+              bruto: brutoPix,
+              taxaValor: taxaPix,
+            },
+            {
+              label: "Cartão de Crédito",
+              taxa: "4,98%",
+              qtd: ticketsCartao.length,
+              bruto: brutoCartao,
+              taxaValor: taxaCartao,
+            },
+            {
+              label: "Dinheiro",
+              taxa: "0%",
+              qtd: ticketsDinheiro.length,
+              bruto: brutoDinheiro,
+              taxaValor: 0,
+            },
+          ].filter((m) => m.qtd > 0);
+
+          return (
+            <div
+              className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+              onClick={() => setRevenueModalOpen(false)}
+            >
+              <div
+                className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-7 py-6 border-b border-zinc-800/60 shrink-0">
+                  <div>
+                    <h3 className="text-white font-bold text-lg tracking-tight">
+                      Receita Detalhada
+                    </h3>
+                    <p className="text-zinc-500 text-xs mt-0.5">
+                      {pagos.length} pagamento{pagos.length !== 1 ? "s" : ""}{" "}
+                      confirmado{pagos.length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <button
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                    onClick={() => setRevenueModalOpen(false)}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="overflow-y-auto flex-1">
+                  {pagos.length === 0 ? (
+                    <div className="py-20 text-center text-zinc-600 flex flex-col items-center gap-3">
+                      <Banknote className="w-10 h-10 opacity-20" />
+                      <p className="text-sm">
+                        Nenhum pagamento confirmado ainda.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Métodos de pagamento */}
+                      <div className="px-7 py-5 space-y-px">
+                        {metodos.map((m, idx) => (
+                          <div key={m.label}>
+                            {idx > 0 && (
+                              <div className="h-px bg-zinc-800/60 my-4" />
+                            )}
+                            <div className="space-y-3">
+                              {/* Cabeçalho do método */}
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-white font-semibold text-sm">
+                                    {m.label}
+                                  </p>
+                                  <p className="text-zinc-600 text-xs mt-0.5">
+                                    {m.qtd} ingresso{m.qtd !== 1 ? "s" : ""} ·
+                                    taxa {m.taxa}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-white font-bold font-mono text-sm">
+                                    {fmt(m.bruto - m.taxaValor)}
+                                  </p>
+                                  <p className="text-zinc-600 text-[10px] uppercase tracking-widest font-bold mt-0.5">
+                                    líquido
+                                  </p>
+                                </div>
+                              </div>
+                              {/* Linha de valores */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5">
+                                  <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold mb-1">
+                                    Bruto
+                                  </p>
+                                  <p className="text-white font-mono text-sm font-bold">
+                                    {fmt(m.bruto)}
+                                  </p>
+                                </div>
+                                <div className="rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5">
+                                  <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold mb-1">
+                                    Taxa
+                                  </p>
+                                  <p className="text-red-400 font-mono text-sm font-bold">
+                                    −{fmt(m.taxaValor)}
+                                  </p>
+                                </div>
+                                <div className="rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5">
+                                  <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold mb-1">
+                                    Líquido
+                                  </p>
+                                  <p className="text-white font-mono text-sm font-bold">
+                                    {fmt(m.bruto - m.taxaValor)}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Bloco de totais */}
+                      <div className="border-t border-zinc-800/60 mx-7 mb-7 pt-5 space-y-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                          Total
+                        </p>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-zinc-400 text-sm">
+                              Valor bruto
+                            </span>
+                            <span className="text-white font-mono text-sm font-bold">
+                              {fmt(totalBruto)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-red-400 text-sm font-medium">
+                              Taxas Mercado Pago
+                            </span>
+                            <span className="text-red-400 font-mono text-sm font-bold">
+                              −{fmt(totalTaxas)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Total líquido */}
+                        <div className="mt-4 flex items-center justify-between bg-white rounded-2xl px-5 py-4">
+                          <div>
+                            <p className="text-black font-bold text-base">
+                              Total líquido
+                            </p>
+                            <p className="text-zinc-500 text-xs mt-0.5">
+                              Após descontar taxas
+                            </p>
+                          </div>
+                          <p className="text-black font-black font-mono text-2xl">
+                            {fmt(totalLiquido)}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
