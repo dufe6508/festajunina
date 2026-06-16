@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   // Defina MP_ACCESS_TOKEN nas variáveis de ambiente do Vercel para produção.
   const ACCESS_TOKEN =
     process.env.MP_ACCESS_TOKEN ||
-    "APP_USR-2742145823707503-061423-663684c6b32baa3c9f7c3afd661b27e5-3473859748";
+    "APP_USR-2977832363876431-061523-c77c1319ce55e8de2c46f5b62f08542d-1967932184";
 
   // DEBUG TEMPORÁRIO — remover depois
   console.log("DEBUG token usado (primeiros 20 chars):", ACCESS_TOKEN.slice(0, 20));
