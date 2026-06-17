@@ -36,6 +36,8 @@ import {
   CheckCircle,
   XCircle,
   Info,
+  Pencil,
+  Unlink,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
 import {
@@ -56,6 +58,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   runTransaction,
 } from "firebase/firestore";
 
@@ -311,10 +314,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [importTypeErrors, setImportTypeErrors] = useState<string[]>([]);
   const importFileRef = useRef<HTMLInputElement>(null);
 
+  // Estados: Importação de Pais/Responsáveis
+  const [importParentSubTab, setImportParentSubTab] = useState<"alunos" | "pais">("alunos");
+  const [importParentFiles, setImportParentFiles] = useState<File[]>([]);
+  const [importParentPreview, setImportParentPreview] = useState<any[]>([]);
+  const [importParentErrors, setImportParentErrors] = useState<string[]>([]);
+  const [importParentLoading, setImportParentLoading] = useState(false);
+  const [importParentResult, setImportParentResult] = useState<{
+    success: number;
+    failed: number;
+    duplicates: number;
+    semAluno: number;
+  } | null>(null);
+  const [importParentDragActive, setImportParentDragActive] = useState(false);
+  const [importParentTypeErrors, setImportParentTypeErrors] = useState<string[]>([]);
+  const importParentFileRef = useRef<HTMLInputElement>(null);
+
   // Sub-abas da seção de Alunos
   const [groupsSubTab, setGroupsSubTab] = useState<
-    "import" | "manual" | "search" | "classes"
+    "import" | "manual" | "search" | "classes" | "responsaveis"
   >("import");
+  const [importSubTab, setImportSubTab] = useState<"alunos" | "pais">("alunos");
   // Turmas: navegação
   const [classesYear, setClassesYear] = useState<string | null>(null); // "1","2","3"
   const [classesClass, setClassesClass] = useState<string | null>(null); // "A".."L"
@@ -338,6 +358,49 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     metodoPagamento: null as "dinheiro" | null,
   });
   const [associarLoading, setAssociarLoading] = useState(false);
+  const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<any[]>([]);
+
+  // Estados: Responsáveis
+  const [responsavelSearch, setResponsavelSearch] = useState('');
+  const [responsavelResults, setResponsavelResults] = useState<any[]>([]);
+  const [responsavelSearchLoading, setResponsavelSearchLoading] = useState(false);
+  const [allResponsaveis, setAllResponsaveis] = useState<any[]>([]);
+  const [allResponsaveisLoading, setAllResponsaveisLoading] = useState(false);
+  const [confirmLimparResponsaveis, setConfirmLimparResponsaveis] = useState(false);
+  const [limparResponsaveisLoading, setLimparResponsaveisLoading] = useState(false);
+  const [responsavelModal, setResponsavelModal] = useState<any | null>(null);
+  const [responsavelModalTicket, setResponsavelModalTicket] = useState<any | null>(null);
+  const [responsavelModalLoading, setResponsavelModalLoading] = useState(false);
+  const [confirmDeleteResponsavel, setConfirmDeleteResponsavel] = useState(false);
+  const [deleteResponsavelLoading, setDeleteResponsavelLoading] = useState(false);
+  const [associarResponsavelForm, setAssociarResponsavelForm] = useState({
+    loteId: '',
+    email: '',
+    status: 'pendente',
+    pago: false,
+    metodoPagamento: null as 'dinheiro' | null,
+  });
+  const [associarResponsavelLoading, setAssociarResponsavelLoading] = useState(false);
+  // Remover responsável a partir da tela do aluno (desassociar ou excluir)
+  const [responsavelToRemove, setResponsavelToRemove] = useState<any | null>(null);
+  const [removeResponsavelLoading, setRemoveResponsavelLoading] = useState(false);
+  // Edição do aluno associado ao responsável
+  const [editingAlunoAssociado, setEditingAlunoAssociado] = useState(false);
+  const [editAlunoSearch, setEditAlunoSearch] = useState("");
+  const [editAlunoResults, setEditAlunoResults] = useState<any[]>([]);
+  const [editAlunoLoading, setEditAlunoLoading] = useState(false);
+  const [savingAlunoAssociado, setSavingAlunoAssociado] = useState(false);
+
+  // Edição inline dos dados do responsável (lápis no modal de pais)
+  const [editingResponsavel, setEditingResponsavel] = useState(false);
+  const [editResponsavelForm, setEditResponsavelForm] = useState({
+    nome: "",
+    email: "",
+    telefone: "",
+    relacao: "responsavel",
+  });
+  const [editResponsavelErrors, setEditResponsavelErrors] = useState<Record<string, string>>({});
+  const [savingResponsavelEdit, setSavingResponsavelEdit] = useState(false);
   const [confirmDeleteClass, setConfirmDeleteClass] = useState<string | null>(
     null
   ); // turmaId
@@ -364,6 +427,30 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [manualSuccessSala, setManualSuccessSala] = useState<string | null>(
     null
   );
+
+  // Estados: Tipo de cadastro manual (aluno ou pai)
+  const [manualType, setManualType] = useState<"aluno" | "pai" | null>(null);
+
+  // Estados: Cadastro Manual de Pai/Responsável
+  const emptyParentForm = {
+    nome: "",
+    cpf: "",
+    email: "",
+    telefone: "",
+    relacao: "pai", // "pai" | "mae" | "responsavel"
+  };
+  const [parentForm, setParentForm] = useState(emptyParentForm);
+  const [parentErrors, setParentErrors] = useState<Record<string, string>>({});
+  const [parentLoading, setParentLoading] = useState(false);
+  const [parentSuccess, setParentSuccess] = useState<any | null>(null);
+
+  // Estados: Busca de aluno para associar ao pai
+  const [parentStudentSearch, setParentStudentSearch] = useState("");
+  const [parentStudentResults, setParentStudentResults] = useState<any[]>([]);
+  const [parentStudentSearchLoading, setParentStudentSearchLoading] = useState(false);
+  const [parentAssociatedStudent, setParentAssociatedStudent] = useState<any | null>(null);
+  const [parentStudentSearchOpen, setParentStudentSearchOpen] = useState(false);
+  const parentStudentSearchRef = useRef<HTMLDivElement>(null);
 
   const allTicketsRef = useRef(allTickets);
   useEffect(() => {
@@ -407,6 +494,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [addTicketStudentSearchOpen]);
+
+  useEffect(() => {
+    if (!parentStudentSearchOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        parentStudentSearchRef.current &&
+        !parentStudentSearchRef.current.contains(e.target as Node)
+      ) {
+        setParentStudentSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [parentStudentSearchOpen]);
 
   useEffect(() => {
     if (!dashboardDetailModal) {
@@ -725,6 +826,176 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setImportLoading(false);
   };
 
+  // ─── PARSE/VALIDAÇÃO/IMPORTAÇÃO DE PAIS ───
+
+  const normalizeParentRow = (row: any) => {
+    const nome =
+      row.responsavel || row.nome || row.nomeresponsavel || row.responsável || row.nomepai || row.nomemae || "";
+    const cpf = (row.cpf || row.documento || row.doc || "").replace(/\D/g, "");
+    const nomeAluno =
+      row.nomealuno || row.aluno || row.nomедоaluno || row.nomedo_aluno || row.nomedaluno || "";
+    const ano = String(row.ano || row.year || row.serie || "").replace(/[^0-9]/g, "");
+    const turma = (row.turma || row.class || row.sala || "").toUpperCase().replace(/\s/g, "");
+    return {
+      nome: String(nome).trim(),
+      cpf,
+      nomeAluno: String(nomeAluno).trim(),
+      ano: ano.trim(),
+      turma: turma.trim(),
+    };
+  };
+
+  const validateParentRow = (
+    r: { nome: string; cpf: string; nomeAluno: string; ano: string; turma: string },
+    rowNum: number
+  ): string | null => {
+    if (!r.nome || r.nome.length < 2) return `Linha ${rowNum}: Nome do responsável inválido ("${r.nome}")`;
+    if (r.cpf.length !== 11) return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
+    if (!r.nomeAluno || r.nomeAluno.length < 2) return `Linha ${rowNum}: Nome do aluno inválido ("${r.nomeAluno}")`;
+    if (!["1", "2", "3"].includes(r.ano)) return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
+    if (!/^[A-L]$/.test(r.turma)) return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
+    return null;
+  };
+
+  const handleImportParentFilesChange = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    setImportParentResult(null);
+    setImportParentErrors([]);
+    setImportParentPreview([]);
+    setImportParentTypeErrors([]);
+
+    const invalid = fileArray.filter((f) => !isAllowedFile(f));
+    const valid = fileArray.filter((f) => isAllowedFile(f));
+
+    if (invalid.length > 0) {
+      setImportParentTypeErrors(
+        invalid.map((f) => `"${f.name}" não é permitido. Apenas .csv ou .xlsx.`)
+      );
+    }
+    if (valid.length === 0) {
+      setImportParentFiles([]);
+      return;
+    }
+    setImportParentFiles(valid);
+
+    try {
+      const allRows: any[] = [];
+      for (const file of valid) {
+        const rows = await parseFile(file);
+        allRows.push(...rows);
+      }
+      if (allRows.length === 0) {
+        setImportParentErrors(["Arquivo(s) vazio(s) ou sem dados."]);
+        return;
+      }
+      const normalized = allRows.map((r) => ({ ...normalizeParentRow(r), _row: r._row }));
+      const errors: string[] = [];
+      normalized.forEach((r) => {
+        const err = validateParentRow(r, r._row);
+        if (err) errors.push(err);
+      });
+      setImportParentErrors(errors);
+      setImportParentPreview(normalized);
+    } catch {
+      setImportParentErrors(["Erro ao processar arquivo(s)."]);
+    }
+  };
+
+  const handleImportParentSubmit = async () => {
+    if (importParentPreview.length === 0 || importParentErrors.length > 0) return;
+    setImportParentLoading(true);
+    setImportParentResult(null);
+
+    try {
+      // Pré-carrega CPFs já cadastrados em responsaveis
+      const cpfsExistentes = new Set<string>();
+      const snapResp = await getDocs(collection(db, "responsaveis"));
+      snapResp.forEach((d) => {
+        const cpf = (d.data().cpf || "").replace(/\D/g, "");
+        if (cpf) cpfsExistentes.add(cpf);
+      });
+
+      // Pré-carrega alunos de todas as turmas para vincular
+      const alunosMap: Record<string, any> = {}; // "nomeNormalizado_turmaId" -> alunoData
+      const turmasSnap = await getDocs(collection(db, "alunos"));
+      for (const turmaDoc of turmasSnap.docs) {
+        const alunosSnap = await getDocs(collection(db, "alunos", turmaDoc.id, "lista"));
+        alunosSnap.forEach((d) => {
+          const data = d.data();
+          const nomeNorm = (data.nome || "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          const key = `${nomeNorm}_${turmaDoc.id}`;
+          alunosMap[key] = { id: d.id, turmaId: turmaDoc.id, ...data };
+        });
+      }
+
+      let success = 0, failed = 0, duplicates = 0, semAluno = 0;
+
+      for (const row of importParentPreview) {
+        const err = validateParentRow(row, row._row);
+        if (err) { failed++; continue; }
+
+        if (cpfsExistentes.has(row.cpf)) { duplicates++; continue; }
+
+        // Tenta localizar o aluno pela combinação nome + turma
+        const turmaId = `${row.ano}${row.turma}`;
+        const nomeAlunoNorm = (row.nomeAluno || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        const key = `${nomeAlunoNorm}_${turmaId}`;
+        const alunoEncontrado = alunosMap[key];
+
+        try {
+          const agora = new Date().toISOString();
+          const respData: any = {
+            nome: row.nome,
+            cpf: row.cpf,
+            relacao: "responsavel",
+            criadoEm: agora,
+          };
+
+          if (alunoEncontrado) {
+            respData.alunoId = alunoEncontrado.id;
+            respData.alunoNome = alunoEncontrado.nome;
+            respData.alunoTurma = turmaId;
+            respData.alunoAno = row.ano;
+            respData.alunoCpf = (alunoEncontrado.cpf || "").replace(/\D/g, "");
+          } else {
+            semAluno++;
+          }
+
+          const nomeId = row.nome.trim().replace(/\s+/g, "_") + "_" + row.cpf.slice(-4);
+          await setDoc(doc(db, "responsaveis", nomeId), respData);
+          cpfsExistentes.add(row.cpf);
+          success++;
+        } catch (e) {
+          console.error("Erro ao salvar responsável:", row, e);
+          failed++;
+        }
+      }
+
+      setImportParentResult({ success, failed, duplicates, semAluno });
+      if (success > 0) {
+        showToast(`${success} responsável(is) importado(s) com sucesso!`, "success");
+      } else {
+        showToast("Nenhum responsável importado. Verifique os dados.", "error");
+      }
+    } catch (e) {
+      console.error("Erro geral na importação de pais:", e);
+      showToast("Erro durante a importação.", "error");
+    }
+    setImportParentLoading(false);
+  };
+
   // ── Limpar turma completa do Firebase ──
   const handleDeleteClass = async (turmaId: string) => {
     setDeleteClassLoading(true);
@@ -778,6 +1049,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const openStudentModal = async (aluno: any, turmaId: string) => {
     setStudentModal({ ...aluno, turmaId });
     setStudentModalTicket(null);
+    setStudentModalResponsaveis([]);
     setStudentModalLoading(true);
     setAssociarForm({
       loteId: "",
@@ -807,6 +1079,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             }));
           }
         });
+        // Busca responsáveis associados ao aluno pelo nome/id
+        const nomeId = aluno.id || aluno.nome?.trim().replace(/\s+/g, "_");
+        const responsaveisSnap = await getDocs(collection(db, "responsaveis"));
+        const resps: any[] = [];
+        responsaveisSnap.forEach((d) => {
+          const data = d.data();
+          if (
+            data.alunoId === nomeId ||
+            (cpfDigits && (data.alunoCpf || "").replace(/\D/g, "") === cpfDigits)
+          ) {
+            resps.push({ id: d.id, ...data });
+          }
+        });
+        setStudentModalResponsaveis(resps);
       }
     } catch {}
     setStudentModalLoading(false);
@@ -1153,6 +1439,547 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       showToast("Erro ao salvar no banco de dados.");
     }
     setManualLoading(false);
+  };
+
+  // ── Handlers do formulário de pai/responsável ──
+  const handleParentFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    let v = value;
+    if (name === "cpf") v = applyCpfMask(value);
+    if (name === "telefone") v = applyPhoneMaskLocal(value);
+    setParentForm((prev) => ({ ...prev, [name]: v }));
+    if (parentErrors[name])
+      setParentErrors((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  // ── Busca alunos para associar ao pai ──
+  const searchStudentsForParent = async (query: string) => {
+    if (!query || query.trim().length < 2) {
+      setParentStudentResults([]);
+      return;
+    }
+    setParentStudentSearchLoading(true);
+    try {
+      const anosSnap = await getDocs(collection(db, "alunos"));
+      const results: any[] = [];
+      for (const turmaDoc of anosSnap.docs) {
+        const alunosSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
+        alunosSnap.forEach((d) => {
+          const data = d.data();
+          const nomeAluno = data.nome || data.nomeAluno || "";
+          if (nomeAluno.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+              id: d.id,
+              turmaId: turmaDoc.id,
+              ...data,
+              nome: nomeAluno,
+            });
+          }
+        });
+      }
+      results.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setParentStudentResults(results);
+    } catch {
+      showToast("Erro ao pesquisar alunos.");
+    }
+    setParentStudentSearchLoading(false);
+  };
+
+  // ── Garante que um aluno tenha no máximo 1 "pai" e 1 "mãe" cadastrados ──
+  // (responsáveis com relacao "responsavel" não entram nessa restrição)
+  const checkRelacaoUnica = async (
+    alunoId: string,
+    relacao: string,
+    excludeId?: string
+  ) => {
+    if (relacao !== "pai" && relacao !== "mae") return true;
+    const snap = await getDocs(collection(db, "responsaveis"));
+    for (const d of snap.docs) {
+      if (excludeId && d.id === excludeId) continue;
+      const data = d.data();
+      if (data.alunoId === alunoId && data.relacao === relacao) return false;
+    }
+    return true;
+  };
+
+  // ── Salva pai/responsável no Firebase ──
+  const handleParentCadastro = async () => {
+    const errs: Record<string, string> = {};
+    if (parentForm.nome.trim().length < 3)
+      errs.nome = "Mínimo 3 caracteres";
+    if (!validateCpfFull(parentForm.cpf)) errs.cpf = "CPF inválido";
+    if (parentForm.email && !/^\S+@\S+\.\S+$/.test(parentForm.email))
+      errs.email = "E-mail inválido";
+    if (
+      parentForm.telefone &&
+      parentForm.telefone.replace(/\D/g, "").length < 10
+    )
+      errs.telefone = "Telefone inválido";
+    setParentErrors(errs);
+    if (Object.keys(errs).length > 0)
+      return showToast("Corrija os erros antes de salvar.");
+
+    setParentLoading(true);
+    const cpfDigits = parentForm.cpf.replace(/\D/g, "");
+
+    try {
+      // Verifica duplicata de CPF em responsáveis
+      const responsaveisSnap = await getDocs(collection(db, "responsaveis"));
+      for (const doc_ of responsaveisSnap.docs) {
+        if ((doc_.data().cpf || "").replace(/\D/g, "") === cpfDigits) {
+          setParentLoading(false);
+          return showToast("CPF já cadastrado como responsável.");
+        }
+      }
+
+      // Garante que o aluno não fique com 2 pais ou 2 mães
+      if (
+        parentAssociatedStudent &&
+        (parentForm.relacao === "pai" || parentForm.relacao === "mae")
+      ) {
+        const livre = await checkRelacaoUnica(
+          parentAssociatedStudent.id,
+          parentForm.relacao
+        );
+        if (!livre) {
+          setParentLoading(false);
+          return showToast(
+            `Este aluno já possui um(a) ${
+              parentForm.relacao === "pai" ? "pai" : "mãe"
+            } cadastrado(a). Desassocie o atual antes de adicionar outro.`
+          );
+        }
+      }
+
+      const payload: Record<string, any> = {
+        nome: parentForm.nome.trim(),
+        cpf: cpfDigits,
+        relacao: parentForm.relacao,
+        criadoEm: new Date().toISOString(),
+      };
+      if (parentForm.email.trim())
+        payload.email = parentForm.email.trim().toLowerCase();
+      if (parentForm.telefone.trim())
+        payload.telefone = parentForm.telefone.trim();
+
+      // Associa ao aluno se selecionado
+      if (parentAssociatedStudent) {
+        payload.alunoId = parentAssociatedStudent.id;
+        payload.alunoNome = parentAssociatedStudent.nome;
+        payload.alunoTurma = parentAssociatedStudent.turmaId;
+        payload.alunoAno = parentAssociatedStudent.ano || parentAssociatedStudent.turmaId?.slice(0, 1) || "";
+      }
+
+      const nomeId = parentForm.nome.trim().replace(/\s+/g, "_");
+      await setDoc(doc(db, "responsaveis", nomeId), payload);
+
+      setParentSuccess({ ...payload });
+      showToast(`Responsável cadastrado com sucesso!`, "success");
+      setParentForm(emptyParentForm);
+      setParentErrors({});
+      setParentAssociatedStudent(null);
+      setParentStudentSearch("");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao salvar no banco de dados.");
+    }
+    setParentLoading(false);
+  };
+
+
+  // ── Busca responsáveis por nome ──
+  const searchResponsaveis = async (query: string) => {
+    if (!query || query.trim().length < 2) {
+      setResponsavelResults([]);
+      return;
+    }
+    setResponsavelSearchLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "responsaveis"));
+      const results: any[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        const nome = data.nome || "";
+        if (nome.toLowerCase().includes(query.toLowerCase())) {
+          results.push({ id: d.id, ...data });
+        }
+      });
+      results.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setResponsavelResults(results);
+    } catch {
+      showToast("Erro ao pesquisar responsáveis.");
+    }
+    setResponsavelSearchLoading(false);
+  };
+
+  // ── Carrega todos os responsáveis do Firebase ──
+  const fetchAllResponsaveis = async () => {
+    setAllResponsaveisLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "responsaveis"));
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setAllResponsaveis(list);
+    } catch {
+      showToast("Erro ao carregar responsáveis.");
+    }
+    setAllResponsaveisLoading(false);
+  };
+
+  // ── Limpa todos os responsáveis do Firebase ──
+  const handleLimparResponsaveis = async () => {
+    setLimparResponsaveisLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "responsaveis"));
+      await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "responsaveis", d.id))));
+      setAllResponsaveis([]);
+      setResponsavelResults([]);
+      setConfirmLimparResponsaveis(false);
+      showToast("Todos os responsáveis foram removidos.", "success");
+    } catch {
+      showToast("Erro ao limpar responsáveis.");
+    }
+    setLimparResponsaveisLoading(false);
+  };
+
+  // ── Abre modal do responsável e busca seu ingresso ──
+  const openResponsavelModal = async (resp: any) => {
+    setResponsavelModal(resp);
+    setResponsavelModalTicket(null);
+    setResponsavelModalLoading(true);
+    setEditingResponsavel(false);
+    setEditResponsavelErrors({});
+    setEditingAlunoAssociado(false);
+    setEditAlunoSearch("");
+    setEditAlunoResults([]);
+    setAssociarResponsavelForm({ loteId: "", email: "", status: "pendente", pago: false, metodoPagamento: null });
+    try {
+      const cpfDigits = (resp.cpf || "").replace(/\D/g, "");
+      const ticket = allTickets.find(
+        (t) =>
+          (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
+          (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+      );
+      setResponsavelModalTicket(ticket || null);
+    } catch {}
+    setResponsavelModalLoading(false);
+  };
+
+  // ── Associar ingresso ao responsável ──
+  const handleAssociarIngressoResponsavel = async () => {
+    if (!responsavelModal || !associarResponsavelForm.loteId) return;
+    setAssociarResponsavelLoading(true);
+    try {
+      const uniqueCode = await generateTicketCode(db);
+      const usado = associarResponsavelForm.status === "validado";
+      const agora = new Date().toISOString();
+      const loteSelecionado = batches.find((b) => b.id === associarResponsavelForm.loteId);
+      const ticketData = {
+        userId: `manual_${uniqueCode}`,
+        nomeAluno: responsavelModal.nome,
+        ano: responsavelModal.alunoAno || "",
+        turma: responsavelModal.alunoTurma ? responsavelModal.alunoTurma.slice(1) : "",
+        type: loteSelecionado?.nome || "Acesso Geral",
+        qty: 1,
+        price: loteSelecionado?.preco || 0,
+        code: uniqueCode,
+        criadoEm: agora,
+        usado,
+        horaEntrada: usado ? agora : null,
+        cpf: (responsavelModal.cpf || "").replace(/\D/g, ""),
+        email: associarResponsavelForm.email || responsavelModal.email || "",
+        origem: "manual_admin",
+        tipoTitular: "responsavel",
+        pagamentoConfirmado: associarResponsavelForm.pago,
+        dataPagamento: associarResponsavelForm.pago ? agora : null,
+        metodoPagamento: associarResponsavelForm.pago
+          ? associarResponsavelForm.metodoPagamento === "dinheiro" ? "dinheiro" : "pix"
+          : null,
+      };
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      setAllTickets((prev) =>
+        [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
+          (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
+        )
+      );
+      setResponsavelModalTicket({ id: uniqueCode, ...ticketData });
+      showToast("Ingresso associado com sucesso!", "success");
+    } catch {
+      showToast("Erro ao associar ingresso.");
+    }
+    setAssociarResponsavelLoading(false);
+  };
+
+  // ── Validar/Desvalidar ingresso do responsável ──
+  const handleToggleValidarResponsavel = async () => {
+    if (!responsavelModalTicket) return;
+    setResponsavelModalLoading(true);
+    try {
+      const agora = new Date().toISOString();
+      const novoUsado = !responsavelModalTicket.usado;
+      await updateDoc(doc(db, "ingressos", responsavelModalTicket.id), {
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      });
+      const updated = { ...responsavelModalTicket, usado: novoUsado, horaEntrada: novoUsado ? agora : null };
+      setResponsavelModalTicket(updated);
+      setAllTickets((prev) => prev.map((t) => (t.id === responsavelModalTicket.id ? updated : t)));
+      showToast(novoUsado ? "Ingresso validado!" : "Validação desfeita!", "success");
+    } catch {
+      showToast("Erro ao atualizar ingresso.");
+    }
+    setResponsavelModalLoading(false);
+  };
+
+  // ── Excluir ingresso do responsável ──
+  const handleExcluirIngressoResponsavel = async () => {
+    if (!responsavelModalTicket) return;
+    setResponsavelModalLoading(true);
+    try {
+      await deleteDoc(doc(db, "ingressos", responsavelModalTicket.id));
+      setAllTickets((prev) => prev.filter((t) => t.id !== responsavelModalTicket.id));
+      setResponsavelModalTicket(null);
+      showToast("Ingresso excluído!", "success");
+    } catch {
+      showToast("Erro ao excluir ingresso.");
+    }
+    setResponsavelModalLoading(false);
+  };
+
+  // ── Excluir responsável do Firebase ──
+  const handleDeleteResponsavel = async () => {
+    if (!responsavelModal) return;
+    setDeleteResponsavelLoading(true);
+    try {
+      await deleteDoc(doc(db, "responsaveis", responsavelModal.id));
+      setResponsavelResults((prev) => prev.filter((r) => r.id !== responsavelModal.id));
+      setAllResponsaveis((prev) => prev.filter((r) => r.id !== responsavelModal.id));
+      setConfirmDeleteResponsavel(false);
+      setResponsavelModal(null);
+      showToast("Responsável excluído com sucesso!", "success");
+    } catch {
+      showToast("Erro ao excluir responsável.");
+    }
+    setDeleteResponsavelLoading(false);
+  };
+
+  // ── Desassocia um responsável do aluno (mantém o cadastro do responsável) ──
+  const handleDesassociarResponsavel = async (resp: any) => {
+    if (!resp) return;
+    setRemoveResponsavelLoading(true);
+    try {
+      await updateDoc(doc(db, "responsaveis", resp.id), {
+        alunoId: deleteField(),
+        alunoNome: deleteField(),
+        alunoTurma: deleteField(),
+        alunoAno: deleteField(),
+        alunoCpf: deleteField(),
+      });
+      setStudentModalResponsaveis((prev) => prev.filter((r) => r.id !== resp.id));
+      setResponsavelResults((prev) =>
+        prev.map((r) =>
+          r.id === resp.id
+            ? { ...r, alunoId: undefined, alunoNome: undefined, alunoTurma: undefined, alunoAno: undefined, alunoCpf: undefined }
+            : r
+        )
+      );
+      showToast("Responsável desassociado do aluno.", "success");
+    } catch {
+      showToast("Erro ao desassociar responsável.");
+    }
+    setRemoveResponsavelLoading(false);
+    setResponsavelToRemove(null);
+  };
+
+  // ── Exclui definitivamente um responsável a partir da tela do aluno ──
+  const handleExcluirResponsavelFromStudent = async (resp: any) => {
+    if (!resp) return;
+    setRemoveResponsavelLoading(true);
+    try {
+      await deleteDoc(doc(db, "responsaveis", resp.id));
+      setStudentModalResponsaveis((prev) => prev.filter((r) => r.id !== resp.id));
+      setResponsavelResults((prev) => prev.filter((r) => r.id !== resp.id));
+      showToast("Responsável excluído com sucesso!", "success");
+    } catch {
+      showToast("Erro ao excluir responsável.");
+    }
+    setRemoveResponsavelLoading(false);
+    setResponsavelToRemove(null);
+  };
+
+  // ── Busca alunos para editar o aluno associado ──
+  const handleEditAlunoSearch = async (query: string) => {
+    setEditAlunoSearch(query);
+    if (query.trim().length < 2) {
+      setEditAlunoResults([]);
+      return;
+    }
+    setEditAlunoLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "alunos"));
+      const results: any[] = [];
+      for (const turmaDoc of snap.docs) {
+        const alunosSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
+        alunosSnap.forEach((d) => {
+          const data = d.data();
+          const nome = data.nome || "";
+          if (nome.toLowerCase().includes(query.trim().toLowerCase())) {
+            results.push({ id: d.id, turmaId: turmaDoc.id, ...data });
+          }
+        });
+      }
+      results.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setEditAlunoResults(results.slice(0, 8));
+    } catch {
+      showToast("Erro ao buscar alunos.");
+    }
+    setEditAlunoLoading(false);
+  };
+
+  // ── Salva o novo aluno associado ao responsável ──
+  const handleSaveAlunoAssociado = async (aluno: any) => {
+    if (!responsavelModal) return;
+    setSavingAlunoAssociado(true);
+    try {
+      const turmaId = aluno.turmaId || `${aluno.ano}${aluno.turma}`;
+      await updateDoc(doc(db, "responsaveis", responsavelModal.id), {
+        alunoId: aluno.id,
+        alunoNome: aluno.nome,
+        alunoTurma: turmaId,
+        alunoAno: aluno.ano,
+        alunoCpf: (aluno.cpf || "").replace(/\D/g, ""),
+      });
+      const updated = {
+        ...responsavelModal,
+        alunoId: aluno.id,
+        alunoNome: aluno.nome,
+        alunoTurma: turmaId,
+        alunoAno: aluno.ano,
+        alunoCpf: (aluno.cpf || "").replace(/\D/g, ""),
+      };
+      setResponsavelModal(updated);
+      setResponsavelResults((prev) =>
+        prev.map((r) => (r.id === responsavelModal.id ? updated : r))
+      );
+      setEditingAlunoAssociado(false);
+      setEditAlunoSearch("");
+      setEditAlunoResults([]);
+      showToast("Aluno associado atualizado com sucesso!", "success");
+    } catch {
+      showToast("Erro ao atualizar aluno associado.");
+    }
+    setSavingAlunoAssociado(false);
+  };
+
+  // ── Remove associação de aluno do responsável ──
+  const handleRemoverAlunoAssociado = async () => {
+    if (!responsavelModal) return;
+    setSavingAlunoAssociado(true);
+    try {
+      await updateDoc(doc(db, "responsaveis", responsavelModal.id), {
+        alunoId: deleteField(),
+        alunoNome: deleteField(),
+        alunoTurma: deleteField(),
+        alunoAno: deleteField(),
+        alunoCpf: deleteField(),
+      });
+      const updated = {
+        ...responsavelModal,
+        alunoId: undefined,
+        alunoNome: undefined,
+        alunoTurma: undefined,
+        alunoAno: undefined,
+        alunoCpf: undefined,
+      };
+      setResponsavelModal(updated);
+      setResponsavelResults((prev) =>
+        prev.map((r) => (r.id === responsavelModal.id ? updated : r))
+      );
+      setEditingAlunoAssociado(false);
+      setEditAlunoSearch("");
+      setEditAlunoResults([]);
+      showToast("Associação removida.", "success");
+    } catch {
+      showToast("Erro ao remover associação.");
+    }
+    setSavingAlunoAssociado(false);
+  };
+
+  // ── Salva edição de e-mail/telefone/relação/nome do responsável (modal de pais) ──
+  const handleSaveResponsavelEdit = async () => {
+    if (!responsavelModal) return;
+    const errs: Record<string, string> = {};
+    if (editResponsavelForm.nome.trim().length < 3) errs.nome = "Mínimo 3 caracteres";
+    if (editResponsavelForm.email && !/^\S+@\S+\.\S+$/.test(editResponsavelForm.email))
+      errs.email = "E-mail inválido";
+    if (
+      editResponsavelForm.telefone &&
+      editResponsavelForm.telefone.replace(/\D/g, "").length < 10
+    )
+      errs.telefone = "Telefone inválido";
+    setEditResponsavelErrors(errs);
+    if (Object.keys(errs).length > 0)
+      return showToast("Corrija os erros antes de salvar.");
+
+    setSavingResponsavelEdit(true);
+    try {
+      // Se a relação mudou para pai/mãe e o responsável está associado a um aluno,
+      // garante que o aluno não fique com 2 pais ou 2 mães
+      if (
+        responsavelModal.alunoId &&
+        (editResponsavelForm.relacao === "pai" || editResponsavelForm.relacao === "mae") &&
+        editResponsavelForm.relacao !== responsavelModal.relacao
+      ) {
+        const livre = await checkRelacaoUnica(
+          responsavelModal.alunoId,
+          editResponsavelForm.relacao,
+          responsavelModal.id
+        );
+        if (!livre) {
+          setSavingResponsavelEdit(false);
+          return showToast(
+            `Este aluno já possui um(a) ${
+              editResponsavelForm.relacao === "pai" ? "pai" : "mãe"
+            } cadastrado(a).`
+          );
+        }
+      }
+
+      const nomeTrim = editResponsavelForm.nome.trim();
+      const emailTrim = editResponsavelForm.email.trim().toLowerCase();
+      const telefoneTrim = editResponsavelForm.telefone.trim();
+
+      await updateDoc(doc(db, "responsaveis", responsavelModal.id), {
+        nome: nomeTrim,
+        relacao: editResponsavelForm.relacao,
+        email: emailTrim ? emailTrim : deleteField(),
+        telefone: telefoneTrim ? telefoneTrim : deleteField(),
+      });
+
+      const updated = {
+        ...responsavelModal,
+        nome: nomeTrim,
+        relacao: editResponsavelForm.relacao,
+        email: emailTrim || null,
+        telefone: telefoneTrim || null,
+      };
+      setResponsavelModal(updated);
+      setResponsavelResults((prev) => prev.map((r) => (r.id === responsavelModal.id ? updated : r)));
+      setStudentModalResponsaveis((prev) => prev.map((r) => (r.id === responsavelModal.id ? updated : r)));
+      setEditingResponsavel(false);
+      showToast("Responsável atualizado com sucesso!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar responsável.");
+    }
+    setSavingResponsavelEdit(false);
   };
 
   const handleSaveBatch = async (e) => {
@@ -3310,12 +4137,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               <div className="flex gap-1 bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-1">
                 {(
                   [
-                    { key: "import", label: "Importar Alunos", icon: FileUp },
+                    { key: "import", label: "Importar", icon: FileUp },
                     { key: "manual", label: "Cadastro Manual", icon: UserPlus },
                     { key: "search", label: "Pesquisar Alunos", icon: Search },
                     { key: "classes", label: "Turmas", icon: MdGroups },
+                    { key: "responsaveis", label: "Responsáveis", icon: User },
                   ] as {
-                    key: "import" | "manual" | "search" | "classes";
+                    key: "import" | "manual" | "search" | "classes" | "responsaveis";
                     label: string;
                     icon: any;
                   }[]
@@ -3328,11 +4156,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         setStudentSearch("");
                         setStudentResults([]);
                       }
+                      if (key !== "manual") {
+                        setManualType(null);
+                      }
                       if (key === "classes") {
                         setClassesYear(null);
                         setClassesClass(null);
                         setClassesWithStudents([]);
                         fetchBatches();
+                      }
+                      if (key === "responsaveis") {
+                        setResponsavelSearch("");
+                        setResponsavelResults([]);
+                        fetchBatches();
+                        fetchAllResponsaveis();
                       }
                     }}
                     className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-xl text-xs font-semibold transition-all ${
@@ -3352,15 +4189,52 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <div className="space-y-6">
                   <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                      <MdGroups className="h-6 w-6 text-white" /> Importar
-                      Alunos
+                      <FileUp className="h-6 w-6 text-white" /> Importar
                     </h1>
                     <p className="text-zinc-400 text-sm mt-1">
-                      Importe uma ou mais planilhas .csv ou .xlsm com os alunos.
-                      Todos serão cadastrados no sistema automaticamente.
+                      Importe planilhas para cadastrar alunos ou responsáveis em massa.
                     </p>
                   </div>
 
+                  {/* Toggle Alunos / Pais */}
+                  <div className="flex gap-1 bg-zinc-900/60 border border-zinc-800 rounded-xl p-1">
+                    {(["alunos", "pais"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => {
+                          setImportSubTab(tab);
+                          if (tab === "alunos") {
+                            setImportParentFiles([]);
+                            setImportParentPreview([]);
+                            setImportParentErrors([]);
+                            setImportParentResult(null);
+                            setImportParentTypeErrors([]);
+                          } else {
+                            setImportFiles([]);
+                            setImportPreview([]);
+                            setImportErrors([]);
+                            setImportResult(null);
+                            setImportTypeErrors([]);
+                          }
+                        }}
+                        className={`flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-bold transition-all ${
+                          importSubTab === tab
+                            ? "bg-white text-black"
+                            : "text-zinc-500 hover:text-white"
+                        }`}
+                      >
+                        {tab === "alunos" ? (
+                          <GraduationCap className="h-3.5 w-3.5" />
+                        ) : (
+                          <User className="h-3.5 w-3.5" />
+                        )}
+                        {tab === "alunos" ? "Alunos" : "Responsáveis"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── IMPORTAR ALUNOS ── */}
+                  {importSubTab === "alunos" && (<>
                   {/* Card de instruções */}
                   <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
                     <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
@@ -3386,27 +4260,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         ))}
                       </div>
                       <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
-                        <li>
-                          <span className="text-zinc-400">ano</span> — ano
-                          escolar (1, 2 ou 3)
-                        </li>
-                        <li>
-                          <span className="text-zinc-400">turma</span> — letra
-                          da turma (A até L)
-                        </li>
-                        <li>
-                          <span className="text-zinc-400">nome</span> — nome
-                          completo do aluno
-                        </li>
-                        <li>
-                          <span className="text-zinc-400">cpf</span> — CPF
-                          somente números (11 dígitos)
-                        </li>
+                        <li><span className="text-zinc-400">ano</span> — ano escolar (1, 2 ou 3)</li>
+                        <li><span className="text-zinc-400">turma</span> — letra da turma (A até L)</li>
+                        <li><span className="text-zinc-400">nome</span> — nome completo do aluno</li>
+                        <li><span className="text-zinc-400">cpf</span> — CPF somente números (11 dígitos)</li>
                       </ul>
                       <p className="text-zinc-600 text-xs">
-                        Funciona com Excel (.xlsx) ou .csv. Múltiplas planilhas
-                        podem ser importadas ao mesmo tempo. Alunos com CPF já
-                        cadastrado são ignorados.
+                        Múltiplas planilhas podem ser importadas ao mesmo tempo. Alunos com CPF já cadastrado são ignorados.
                       </p>
                     </div>
                   </div>
@@ -3750,6 +4610,267 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         )}
                       </button>
                     )}
+                  </>)}
+
+                  {/* ── IMPORTAR PAIS/RESPONSÁVEIS ── */}
+                  {importSubTab === "pais" && (<>
+                  {/* Card de instruções */}
+                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                    <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                    <div className="space-y-2 text-sm text-zinc-400">
+                      <p className="font-semibold text-white">Como preparar o arquivo:</p>
+                      <p>
+                        A planilha deve ter as colunas abaixo. O sistema tentará
+                        vincular automaticamente ao aluno pelo nome e turma.
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {["Responsavel", "CPF", "Nome do Aluno", "Ano", "Turma"].map((col) => (
+                          <span key={col} className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300">
+                            {col}
+                          </span>
+                        ))}
+                      </div>
+                      <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
+                        <li><span className="text-zinc-400">Responsavel</span> — nome do pai/mãe/responsável</li>
+                        <li><span className="text-zinc-400">CPF</span> — CPF do responsável (com ou sem pontuação)</li>
+                        <li><span className="text-zinc-400">Nome do Aluno</span> — nome do aluno já cadastrado no sistema</li>
+                        <li><span className="text-zinc-400">Ano</span> — ano escolar do aluno (1, 2 ou 3)</li>
+                        <li><span className="text-zinc-400">Turma</span> — letra da turma do aluno (A até L)</li>
+                      </ul>
+                      <p className="text-zinc-600 text-xs">
+                        Se o aluno não for encontrado, o responsável é cadastrado sem vínculo.
+                        Responsáveis com CPF já cadastrado são ignorados.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Zona de drag & drop - Pais */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setImportParentDragActive(true); }}
+                    onDragLeave={() => setImportParentDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setImportParentDragActive(false);
+                      if (e.dataTransfer.files.length > 0)
+                        handleImportParentFilesChange(e.dataTransfer.files);
+                    }}
+                    onClick={() => importParentFileRef.current?.click()}
+                    className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                      importParentDragActive
+                        ? "border-white bg-white/5"
+                        : importParentFiles.length > 0
+                        ? "border-zinc-600 bg-[#0a0a0a]"
+                        : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                    }`}
+                  >
+                    <input
+                      ref={importParentFileRef}
+                      type="file"
+                      accept=".csv,.xlsx"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0)
+                          handleImportParentFilesChange(e.target.files);
+                      }}
+                    />
+                    {importParentFiles.length > 0 ? (
+                      <>
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                          <FileSpreadsheet className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="text-center">
+                          {importParentFiles.length === 1 ? (
+                            <>
+                              <p className="text-white font-semibold text-sm">{importParentFiles[0].name}</p>
+                              <p className="text-zinc-500 text-xs mt-1">{(importParentFiles[0].size / 1024).toFixed(1)} KB</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-white font-semibold text-sm">{importParentFiles.length} arquivos selecionados</p>
+                              <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
+                                {importParentFiles.map((f, i) => (
+                                  <p key={i} className="text-zinc-500 text-xs font-mono">
+                                    {f.name} <span className="text-zinc-700">({(f.size / 1024).toFixed(1)} KB)</span>
+                                  </p>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImportParentFiles([]);
+                            setImportParentPreview([]);
+                            setImportParentErrors([]);
+                            setImportParentResult(null);
+                            setImportParentTypeErrors([]);
+                          }}
+                          className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                        >
+                          Remover arquivo(s)
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                          <FileUp className="h-7 w-7 text-zinc-500" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-white font-semibold text-sm">Arraste os arquivos aqui</p>
+                          <p className="text-zinc-500 text-xs mt-1">ou clique para selecionar — somente .csv ou .xlsx</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Erros de tipo */}
+                  {importParentTypeErrors.length > 0 && (
+                    <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle className="h-4 w-4 text-orange-400" />
+                        <p className="text-sm font-bold text-orange-400">Arquivo(s) não aceito(s)</p>
+                      </div>
+                      <ul className="space-y-1">
+                        {importParentTypeErrors.map((err, i) => (
+                          <li key={i} className="text-xs text-orange-300 font-mono">{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Preview */}
+                  {importParentPreview.length > 0 && (
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                        <p className="text-sm font-bold text-white">Pré-visualização</p>
+                        <span className="text-xs text-zinc-500">{importParentPreview.length} registros</span>
+                      </div>
+                      <div className="overflow-y-auto" style={{ maxHeight: "400px", scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}>
+                        <table className="w-full text-sm border-collapse">
+                          <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                            <tr className="border-b border-zinc-800">
+                              <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">#</th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Responsável</th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">CPF</th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Aluno</th>
+                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Turma</th>
+                              <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importParentPreview.map((row, i) => {
+                              const err = validateParentRow(row, row._row);
+                              return (
+                                <tr key={i} className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${err ? "bg-red-500/5" : ""}`}>
+                                  <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600">{i + 1}</td>
+                                  <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">{row.nome || "—"}</td>
+                                  <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40">
+                                    {row.cpf ? formatCpf(row.cpf) : "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-300 text-sm border-l border-zinc-800/40">{row.nomeAluno || "—"}</td>
+                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                    {row.ano && row.turma ? `${row.ano}${row.turma}` : "—"}
+                                  </td>
+                                  <td className="px-3 py-3 border-l border-zinc-800/40">
+                                    {err ? <XCircle className="h-3.5 w-3.5 text-red-400/70" /> : <CheckCircle className="h-3.5 w-3.5 text-green-500" />}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Erros de validação */}
+                  {importParentErrors.length > 0 && (
+                    <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="h-4 w-4 text-red-400" />
+                        <p className="text-sm font-bold text-red-400">{importParentErrors.length} erro(s) encontrado(s)</p>
+                      </div>
+                      <ul className="space-y-1 max-h-32 overflow-y-auto">
+                        {importParentErrors.map((err, i) => (
+                          <li key={i} className="text-xs text-red-300 font-mono">{err}</li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-zinc-500 mt-3">Corrija os erros no arquivo e reimporte para continuar.</p>
+                    </div>
+                  )}
+
+                  {/* Resultado */}
+                  {importParentResult && (
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                          <CheckCircle className="h-4 w-4 text-zinc-300" />
+                        </div>
+                        <div>
+                          <p className="text-white font-semibold text-sm">Importação concluída</p>
+                          <p className="text-zinc-600 text-xs">Responsáveis cadastrados no Firebase</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-white tabular-nums">{importParentResult.success}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">Cadastrados</p>
+                        </div>
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-zinc-400 tabular-nums">{importParentResult.duplicates}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Duplicatas</p>
+                        </div>
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-yellow-400 tabular-nums">{importParentResult.semAluno}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Sem vínculo</p>
+                        </div>
+                        <div className="p-4 text-center">
+                          <p className="text-2xl font-black text-zinc-400 tabular-nums">{importParentResult.failed}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Falhas</p>
+                        </div>
+                      </div>
+                      {importParentResult.semAluno > 0 && (
+                        <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
+                          <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+                          <p className="text-xs text-yellow-300">
+                            {importParentResult.semAluno} responsável(is) foram cadastrados sem vínculo com aluno
+                            porque o nome ou turma não coincidiu com registros existentes.
+                            Você pode editar o vínculo manualmente na aba Responsáveis.
+                          </p>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          setImportParentFiles([]);
+                          setImportParentPreview([]);
+                          setImportParentErrors([]);
+                          setImportParentResult(null);
+                          setImportParentTypeErrors([]);
+                        }}
+                        className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                      >
+                        Importar outra planilha
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Botão importar */}
+                  {importParentFiles.length > 0 && importParentErrors.length === 0 && !importParentResult && (
+                    <button
+                      onClick={handleImportParentSubmit}
+                      disabled={importParentLoading}
+                      className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {importParentLoading ? (
+                        <><Loader2 className="h-5 w-5 animate-spin" /> Importando responsáveis...</>
+                      ) : (
+                        <><FileUp className="h-5 w-5" /> Importar {importParentFiles.length > 1 ? `${importParentFiles.length} Planilhas` : "Responsáveis"}</>
+                      )}
+                    </button>
+                  )}
+                  </>)}
                 </div>
               )}
 
@@ -3762,10 +4883,74 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       Manual
                     </h1>
                     <p className="text-zinc-400 text-sm mt-1">
-                      Cadastre um aluno manualmente inserindo os dados abaixo.
+                      Selecione o tipo de cadastro para continuar.
                     </p>
                   </div>
 
+                  {/* Seletor de tipo */}
+                  {!manualType && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => {
+                          setManualType("aluno");
+                          setManualSuccessSala(null);
+                          setManualForm(emptyManualForm);
+                          setManualErrors({});
+                        }}
+                        className="group bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 flex flex-col items-center gap-4 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all duration-200 text-left"
+                      >
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center group-hover:border-zinc-600 transition-all">
+                          <GraduationCap className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-white font-bold text-sm">Aluno</p>
+                          <p className="text-zinc-500 text-xs mt-1">
+                            Cadastrar um aluno manualmente
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setManualType("pai");
+                          setParentSuccess(null);
+                          setParentForm(emptyParentForm);
+                          setParentErrors({});
+                          setParentAssociatedStudent(null);
+                          setParentStudentSearch("");
+                          setParentStudentResults([]);
+                        }}
+                        className="group bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 flex flex-col items-center gap-4 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all duration-200 text-left"
+                      >
+                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center group-hover:border-zinc-600 transition-all">
+                          <User className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-white font-bold text-sm">
+                            Pai / Responsável
+                          </p>
+                          <p className="text-zinc-500 text-xs mt-1">
+                            Cadastrar e associar a um aluno
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Botão voltar ao seletor */}
+                  {manualType && (
+                    <button
+                      onClick={() => setManualType(null)}
+                      className="flex items-center gap-2 text-zinc-500 hover:text-white text-xs font-semibold transition-colors"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      Alterar tipo de cadastro
+                    </button>
+                  )}
+
+                  {/* ── FORM: ALUNO ── */}
+                  {manualType === "aluno" && (
+                    <>
                   {/* Feedback da última sala cadastrada */}
                   {manualSuccessSala && (
                     <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 flex items-center gap-3">
@@ -3958,6 +5143,275 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       </Button>
                     </div>
                   </div>
+                    </>
+                  )}
+
+                  {/* ── FORM: PAI / RESPONSÁVEL ── */}
+                  {manualType === "pai" && (
+                    <>
+                      {/* Feedback de sucesso */}
+                      {parentSuccess && (
+                        <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 space-y-2">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                            <p className="text-emerald-300 text-sm font-semibold">
+                              Responsável cadastrado com sucesso!
+                            </p>
+                          </div>
+                          {parentSuccess.alunoNome && (
+                            <div className="ml-8 bg-emerald-950/80 border border-emerald-800/40 rounded-xl px-4 py-3 space-y-1">
+                              <p className="text-emerald-200 text-xs font-bold uppercase tracking-widest">Associado a</p>
+                              <p className="text-white font-semibold text-sm">{parentSuccess.alunoNome}</p>
+                              <p className="text-emerald-400 text-xs">
+                                Turma {parentSuccess.alunoTurma} · CPF {formatCpf(parentSuccess.cpf)}
+                              </p>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              setParentSuccess(null);
+                            }}
+                            className="ml-8 text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                          >
+                            Cadastrar outro responsável
+                          </button>
+                        </div>
+                      )}
+
+                      {!parentSuccess && (
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                        {/* Preview de associação */}
+                        {parentAssociatedStudent && (
+                          <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <GraduationCap className="h-4 w-4 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-400 text-sm truncate">
+                                Pai de{" "}
+                                <span className="text-white font-bold">
+                                  {parentAssociatedStudent.nome}
+                                </span>
+                                {" · "}
+                                <span className="text-zinc-400">
+                                  Turma {parentAssociatedStudent.turmaId}
+                                </span>
+                                {parentAssociatedStudent.cpf && (
+                                  <span className="text-zinc-500">
+                                    {" · "}CPF {formatCpf(parentAssociatedStudent.cpf)}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setParentAssociatedStudent(null);
+                                setParentStudentSearch("");
+                                setParentStudentResults([]);
+                              }}
+                              className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="p-5 space-y-4">
+                          {/* Nome */}
+                          <div className="space-y-1.5">
+                            <Label>
+                              Nome do Responsável <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              name="nome"
+                              value={parentForm.nome}
+                              onChange={handleParentFormChange}
+                              placeholder="Nome completo do pai/responsável"
+                              error={!!parentErrors.nome}
+                            />
+                            {parentErrors.nome && (
+                              <p className="text-red-400 text-xs flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 shrink-0" />
+                                {parentErrors.nome}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Relação */}
+                          <div className="space-y-1.5">
+                            <Label>Relação <span className="text-red-500">*</span></Label>
+                            <select
+                              name="relacao"
+                              value={parentForm.relacao}
+                              onChange={handleParentFormChange}
+                              className="flex h-12 w-full rounded-xl border border-zinc-800 px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none"
+                            >
+                              <option value="pai">Pai</option>
+                              <option value="mae">Mãe</option>
+                              <option value="responsavel">Responsável</option>
+                            </select>
+                          </div>
+
+                          {/* CPF */}
+                          <div className="space-y-1.5">
+                            <Label>
+                              CPF <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              name="cpf"
+                              value={parentForm.cpf}
+                              onChange={handleParentFormChange}
+                              placeholder="000.000.000-00"
+                              inputMode="numeric"
+                              error={!!parentErrors.cpf}
+                            />
+                            {parentErrors.cpf && (
+                              <p className="text-red-400 text-xs flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 shrink-0" />
+                                {parentErrors.cpf}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Associar a aluno */}
+                          <div className="space-y-1.5">
+                            <Label>Associar a Aluno</Label>
+                            {!parentAssociatedStudent ? (
+                              <div className="relative" ref={parentStudentSearchRef}>
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                                <input
+                                  type="text"
+                                  placeholder="Pesquisar aluno pelo nome..."
+                                  value={parentStudentSearch}
+                                  onChange={(e) => {
+                                    setParentStudentSearch(e.target.value);
+                                    setParentStudentSearchOpen(true);
+                                    searchStudentsForParent(e.target.value);
+                                  }}
+                                  onFocus={() => setParentStudentSearchOpen(true)}
+                                  className="w-full h-12 pl-11 pr-4 rounded-xl bg-black border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                                />
+                                {parentStudentSearchLoading && (
+                                  <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                                )}
+                                {/* Dropdown de resultados */}
+                                {parentStudentSearchOpen && parentStudentSearch.length >= 2 && !parentStudentSearchLoading && (
+                                  <div className="absolute z-50 w-full mt-1 bg-[#111] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+                                    {parentStudentResults.length === 0 ? (
+                                      <div className="py-8 text-center text-zinc-600 text-sm">
+                                        Nenhum aluno encontrado
+                                      </div>
+                                    ) : (
+                                      parentStudentResults.map((aluno, i) => (
+                                        <button
+                                          key={i}
+                                          onClick={() => {
+                                            setParentAssociatedStudent(aluno);
+                                            setParentStudentSearch("");
+                                            setParentStudentResults([]);
+                                            setParentStudentSearchOpen(false);
+                                          }}
+                                          className="w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors border-b border-zinc-800/50 last:border-0 flex items-center justify-between gap-3"
+                                        >
+                                          <div className="min-w-0">
+                                            <p className="text-white text-sm font-medium truncate">
+                                              {aluno.nome}
+                                            </p>
+                                            <p className="text-zinc-500 text-xs mt-0.5">
+                                              Turma {aluno.turmaId}
+                                              {aluno.cpf && ` · CPF ${formatCpf(aluno.cpf)}`}
+                                            </p>
+                                          </div>
+                                          <GraduationCap className="h-4 w-4 text-zinc-600 shrink-0" />
+                                        </button>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="h-12 rounded-xl border border-emerald-800/60 bg-emerald-950/30 px-4 flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <GraduationCap className="h-4 w-4 text-emerald-400 shrink-0" />
+                                  <span className="text-emerald-300 text-sm font-medium truncate">
+                                    {parentAssociatedStudent.nome} — Turma {parentAssociatedStudent.turmaId}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setParentAssociatedStudent(null);
+                                    setParentStudentSearch("");
+                                  }}
+                                  className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Divisor opcional */}
+                          <div className="flex items-center gap-3 py-1">
+                            <div className="flex-1 h-px bg-zinc-800" />
+                            <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
+                              Opcional
+                            </span>
+                            <div className="flex-1 h-px bg-zinc-800" />
+                          </div>
+
+                          {/* E-mail */}
+                          <div className="space-y-1.5">
+                            <Label>E-mail</Label>
+                            <Input
+                              name="email"
+                              value={parentForm.email}
+                              onChange={handleParentFormChange}
+                              placeholder="responsavel@email.com"
+                              type="email"
+                              error={!!parentErrors.email}
+                            />
+                            {parentErrors.email && (
+                              <p className="text-red-400 text-xs flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 shrink-0" />
+                                {parentErrors.email}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Telefone */}
+                          <div className="space-y-1.5">
+                            <Label>Telefone</Label>
+                            <Input
+                              name="telefone"
+                              value={parentForm.telefone}
+                              onChange={handleParentFormChange}
+                              placeholder="(31) 99999-9999"
+                              inputMode="numeric"
+                              error={!!parentErrors.telefone}
+                            />
+                            {parentErrors.telefone && (
+                              <p className="text-red-400 text-xs flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 shrink-0" />
+                                {parentErrors.telefone}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Botão salvar */}
+                        <div className="px-5 pb-5">
+                          <Button
+                            className="w-full h-14"
+                            onClick={handleParentCadastro}
+                            isLoading={parentLoading}
+                            disabled={parentLoading}
+                          >
+                            <User className="h-5 w-5" />
+                            {parentLoading ? "Salvando..." : "Cadastrar Responsável"}
+                          </Button>
+                        </div>
+                      </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
 
@@ -4045,6 +5499,159 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   {studentSearch.length < 2 && studentSearch.length > 0 && (
                     <p className="text-zinc-600 text-xs text-center">
                       Digite pelo menos 2 letras para pesquisar.
+                    </p>
+                  )}
+                </div>
+              )}
+
+
+              {/* ── SUB-ABA: RESPONSÁVEIS ── */}
+              {groupsSubTab === "responsaveis" && (
+                <div className="space-y-5">
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                        <User className="h-6 w-6 text-white" /> Responsáveis
+                      </h1>
+                      <p className="text-zinc-400 text-sm mt-1">
+                        {allResponsaveisLoading
+                          ? "Carregando..."
+                          : allResponsaveis.length === 0
+                          ? "Nenhum responsável cadastrado."
+                          : `${allResponsaveis.length} responsável${allResponsaveis.length !== 1 ? "is" : ""} cadastrado${allResponsaveis.length !== 1 ? "s" : ""}.`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={fetchAllResponsaveis}
+                        disabled={allResponsaveisLoading}
+                        className="h-9 px-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 text-xs font-semibold hover:text-white hover:border-zinc-600 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {allResponsaveisLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                        Atualizar
+                      </button>
+                      {allResponsaveis.length > 0 && (
+                        <button
+                          onClick={() => setConfirmLimparResponsaveis(true)}
+                          className="h-9 px-3 rounded-xl border border-red-500/30 bg-red-500/5 text-red-400 text-xs font-semibold hover:bg-red-500/10 hover:border-red-500/50 transition-all flex items-center gap-1.5"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Limpar tudo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Campo de busca */}
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Filtrar por nome..."
+                      value={responsavelSearch}
+                      onChange={(e) => {
+                        setResponsavelSearch(e.target.value);
+                        searchResponsaveis(e.target.value);
+                      }}
+                      className="w-full h-12 pl-11 pr-10 rounded-xl bg-[#0a0a0a] border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                    />
+                    {responsavelSearch.length > 0 && (
+                      <button
+                        onClick={() => { setResponsavelSearch(""); setResponsavelResults([]); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-zinc-600 hover:text-white transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {responsavelSearchLoading && (
+                      <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                    )}
+                  </div>
+
+                  {/* Lista: resultados de busca OU todos */}
+                  {(() => {
+                    const isFiltering = responsavelSearch.length >= 2;
+                    const list = isFiltering ? responsavelResults : allResponsaveis;
+                    const loading = isFiltering ? responsavelSearchLoading : allResponsaveisLoading;
+
+                    if (loading) return (
+                      <div className="py-16 flex justify-center">
+                        <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                      </div>
+                    );
+
+                    if (list.length === 0) return (
+                      <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
+                        <User className="h-8 w-8 opacity-20" />
+                        <p className="text-sm">
+                          {isFiltering
+                            ? `Nenhum responsável encontrado para "${responsavelSearch}".`
+                            : "Nenhum responsável cadastrado ainda."}
+                        </p>
+                      </div>
+                    );
+
+                    return (
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+                          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                            {isFiltering ? "Resultados" : "Todos"}
+                          </p>
+                          <span className="text-xs text-zinc-600">{list.length}</span>
+                        </div>
+                        <div className="divide-y divide-zinc-800/50 max-h-[60vh] overflow-y-auto">
+                          {list.map((resp, i) => {
+                            const cpfDigits = (resp.cpf || "").replace(/\D/g, "");
+                            const hasTicket = allTickets.some(
+                              (t) =>
+                                (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
+                                (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+                            );
+                            return (
+                              <button
+                                key={i}
+                                onClick={() => openResponsavelModal(resp)}
+                                className="w-full flex items-center justify-between px-5 py-4 hover:bg-zinc-900/40 transition-colors text-left"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-white font-semibold text-sm truncate">
+                                      {resp.nome}
+                                    </p>
+                                    {hasTicket && (
+                                      <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-[9px] font-bold text-green-400 uppercase tracking-wider">
+                                        ingresso
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-zinc-500 text-xs mt-0.5 font-mono">
+                                    {formatCpf(resp.cpf)}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0 ml-3">
+                                  {resp.alunoNome && (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-bold text-zinc-300">
+                                      <GraduationCap className="h-3 w-3" />
+                                      {resp.alunoTurma}
+                                    </span>
+                                  )}
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-bold text-zinc-400 capitalize">
+                                    {resp.relacao || "responsável"}
+                                  </span>
+                                  <ChevronRight className="h-4 w-4 text-zinc-600" />
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {responsavelSearch.length === 1 && (
+                    <p className="text-zinc-600 text-xs text-center">
+                      Digite pelo menos 2 letras para filtrar.
                     </p>
                   )}
                 </div>
@@ -4466,6 +6073,59 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     </div>
                   </div>
 
+                  {/* Seção de Responsáveis */}
+                  {studentModalResponsaveis.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                        Responsáveis
+                      </p>
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                        {studentModalResponsaveis.map((resp) => (
+                          <div key={resp.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-white text-sm font-semibold truncate">{resp.nome}</p>
+                                <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-[10px] font-bold text-zinc-400 capitalize">
+                                  {resp.relacao || "responsável"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                <span className="text-zinc-500 text-xs font-mono">{formatCpf(resp.cpf)}</span>
+                                {resp.telefone && (
+                                  <span className="text-zinc-600 text-xs">{resp.telefone}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {(() => {
+                                const cpfR = (resp.cpf || "").replace(/\D/g, "");
+                                const ticket = allTickets.find(
+                                  (t) => (t.cpf || "").replace(/\D/g, "") === cpfR
+                                );
+                                return ticket ? (
+                                  <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-[10px] font-bold text-green-400 uppercase tracking-wider">
+                                    <LuTicketCheck className="h-3 w-3" /> ingresso
+                                  </span>
+                                ) : (
+                                  <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
+                                    sem ingresso
+                                  </span>
+                                );
+                              })()}
+                              <button
+                                onClick={() => setResponsavelToRemove(resp)}
+                                className="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
+                                title="Remover responsável"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Seção de Ingresso */}
                   <div className="space-y-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
@@ -4732,6 +6392,570 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ── MODAL DO RESPONSÁVEL ── */}
+      {responsavelModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setResponsavelModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl max-h-[92vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                  <User className="h-5 w-5 text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">
+                    {responsavelModal.nome}
+                  </p>
+                  <p className="text-zinc-500 text-xs mt-0.5 capitalize">
+                    {responsavelModal.relacao || "Responsável"}
+                    {responsavelModal.alunoNome && ` · Pai de ${responsavelModal.alunoNome}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setEditResponsavelForm({
+                      nome: responsavelModal.nome || "",
+                      email: responsavelModal.email || "",
+                      telefone: responsavelModal.telefone || "",
+                      relacao: responsavelModal.relacao || "responsavel",
+                    });
+                    setEditResponsavelErrors({});
+                    setEditingResponsavel(true);
+                  }}
+                  className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                  title="Editar responsável"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteResponsavel(true)}
+                  className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-full transition-colors"
+                  title="Excluir responsável"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setResponsavelModal(null)}
+                  className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+              {responsavelModalLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Dados cadastrais */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Dados Cadastrais
+                    </p>
+                    {editingResponsavel ? (
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                        <div>
+                          <Label>Nome</Label>
+                          <Input
+                            value={editResponsavelForm.nome}
+                            onChange={(e) =>
+                              setEditResponsavelForm((p) => ({ ...p, nome: e.target.value }))
+                            }
+                            error={editResponsavelErrors.nome}
+                          />
+                          {editResponsavelErrors.nome && (
+                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.nome}</p>
+                          )}
+                        </div>
+                        <div>
+                          <Label>E-mail</Label>
+                          <Input
+                            type="email"
+                            placeholder="email@exemplo.com"
+                            value={editResponsavelForm.email}
+                            onChange={(e) =>
+                              setEditResponsavelForm((p) => ({ ...p, email: e.target.value }))
+                            }
+                            error={editResponsavelErrors.email}
+                          />
+                          {editResponsavelErrors.email && (
+                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.email}</p>
+                          )}
+                        </div>
+                        <div>
+                          <Label>Telefone</Label>
+                          <Input
+                            placeholder="(31) 99999-9999"
+                            value={editResponsavelForm.telefone}
+                            onChange={(e) =>
+                              setEditResponsavelForm((p) => ({
+                                ...p,
+                                telefone: applyPhoneMaskLocal(e.target.value),
+                              }))
+                            }
+                            error={editResponsavelErrors.telefone}
+                          />
+                          {editResponsavelErrors.telefone && (
+                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.telefone}</p>
+                          )}
+                        </div>
+                        <div>
+                          <Label>Relação</Label>
+                          <select
+                            value={editResponsavelForm.relacao}
+                            onChange={(e) =>
+                              setEditResponsavelForm((p) => ({ ...p, relacao: e.target.value }))
+                            }
+                            className="flex h-12 w-full rounded-xl border border-zinc-800 px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none"
+                          >
+                            <option value="pai">Pai</option>
+                            <option value="mae">Mãe</option>
+                            <option value="responsavel">Responsável</option>
+                          </select>
+                        </div>
+                        <p className="text-zinc-600 text-[11px]">
+                          O CPF não pode ser alterado por aqui.
+                        </p>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => setEditingResponsavel(false)}
+                            disabled={savingResponsavelEdit}
+                            className="flex-1 h-10 rounded-xl border border-zinc-800 text-zinc-300 text-xs font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={handleSaveResponsavelEdit}
+                            disabled={savingResponsavelEdit}
+                            className="flex-1 h-10 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
+                          >
+                            {savingResponsavelEdit && (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            )}
+                            Salvar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                        {[
+                          { label: "CPF", value: formatCpf(responsavelModal.cpf) },
+                          { label: "E-mail", value: responsavelModal.email || null },
+                          { label: "Telefone", value: responsavelModal.telefone || null },
+                          { label: "Relação", value: responsavelModal.relacao ? responsavelModal.relacao.charAt(0).toUpperCase() + responsavelModal.relacao.slice(1) : null },
+                          { label: "Cadastrado em", value: responsavelModal.criadoEm ? new Date(responsavelModal.criadoEm).toLocaleDateString("pt-BR") : null },
+                        ].map(({ label, value }) => (
+                          <div key={label} className="flex items-center justify-between px-4 py-3">
+                            <span className="text-zinc-500 text-xs font-semibold">{label}</span>
+                            <span className={`text-xs font-mono ${value ? "text-white" : "text-zinc-700 italic"}`}>
+                              {value || "não informado"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Aluno associado */}
+                    <div className="space-y-2">
+                      {editingAlunoAssociado ? (
+                        <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                            Buscar aluno para associar
+                          </p>
+                          <div className="relative">
+                            <Input
+                              placeholder="Digite o nome do aluno..."
+                              value={editAlunoSearch}
+                              onChange={(e) => handleEditAlunoSearch(e.target.value)}
+                              autoFocus
+                            />
+                            {editAlunoLoading && (
+                              <Loader2 className="absolute right-3 top-3.5 h-4 w-4 text-zinc-500 animate-spin" />
+                            )}
+                          </div>
+                          {editAlunoResults.length > 0 && (
+                            <div className="bg-black border border-zinc-800 rounded-xl divide-y divide-zinc-800/60 max-h-48 overflow-y-auto">
+                              {editAlunoResults.map((aluno) => (
+                                <button
+                                  key={aluno.id + aluno.turmaId}
+                                  onClick={() => handleSaveAlunoAssociado(aluno)}
+                                  disabled={savingAlunoAssociado}
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-900 transition-colors disabled:opacity-50"
+                                >
+                                  <GraduationCap className="h-4 w-4 text-zinc-500 shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="text-white text-sm font-semibold truncate">{aluno.nome}</p>
+                                    <p className="text-zinc-500 text-xs">
+                                      Turma {aluno.turmaId} · {aluno.ano}º Ano
+                                    </p>
+                                  </div>
+                                  {savingAlunoAssociado && (
+                                    <Loader2 className="h-3 w-3 text-zinc-500 animate-spin ml-auto shrink-0" />
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {editAlunoSearch.trim().length >= 2 && !editAlunoLoading && editAlunoResults.length === 0 && (
+                            <p className="text-zinc-600 text-xs text-center py-2">
+                              Nenhum aluno encontrado.
+                            </p>
+                          )}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => {
+                                setEditingAlunoAssociado(false);
+                                setEditAlunoSearch("");
+                                setEditAlunoResults([]);
+                              }}
+                              disabled={savingAlunoAssociado}
+                              className="flex-1 h-10 rounded-xl border border-zinc-800 text-zinc-300 text-xs font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            {responsavelModal.alunoNome && (
+                              <button
+                                onClick={handleRemoverAlunoAssociado}
+                                disabled={savingAlunoAssociado}
+                                className="flex-1 h-10 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-red-500/20 transition-all disabled:opacity-50"
+                              >
+                                {savingAlunoAssociado ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Unlink className="h-3.5 w-3.5" />
+                                )}
+                                Remover associação
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border bg-zinc-900/50 border-zinc-800 text-xs font-semibold text-zinc-300 group cursor-pointer hover:border-zinc-700 transition-colors"
+                          onClick={() => setEditingAlunoAssociado(true)}
+                          title="Clique para editar o aluno associado"
+                        >
+                          <GraduationCap className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                          {responsavelModal.alunoNome ? (
+                            <>
+                              Associado a{" "}
+                              <span className="text-white font-bold">{responsavelModal.alunoNome}</span>
+                              {" · "}Turma {responsavelModal.alunoTurma}
+                              {responsavelModal.alunoAno && ` · ${responsavelModal.alunoAno}º Ano`}
+                            </>
+                          ) : (
+                            <span className="text-zinc-600 italic">Sem aluno associado</span>
+                          )}
+                          <Pencil className="h-3 w-3 text-zinc-600 group-hover:text-zinc-400 ml-auto shrink-0 transition-colors" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Seção de Ingresso */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Ingresso
+                    </p>
+
+                    {responsavelModalTicket ? (
+                      /* Ingresso existente */
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
+                        <div className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${responsavelModalTicket.usado ? "bg-green-500/5" : "bg-zinc-900/30"}`}>
+                          {responsavelModalTicket.usado ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />
+                              <span className="text-green-400 text-xs font-bold">Validado — entrada confirmada</span>
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="h-4 w-4 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-400 text-xs font-bold">Pendente de validação</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="divide-y divide-zinc-800/60">
+                          {[
+                            { label: "Código", value: responsavelModalTicket.code },
+                            { label: "Lote", value: responsavelModalTicket.type },
+                            { label: "Valor", value: responsavelModalTicket.price != null ? `R$ ${Number(responsavelModalTicket.price).toFixed(2).replace(".", ",")}` : null },
+                            { label: "Pagamento", value: responsavelModalTicket.pagamentoConfirmado ? `Confirmado${responsavelModalTicket.metodoPagamento ? " · " + responsavelModalTicket.metodoPagamento : ""}` : "Pendente" },
+                            { label: "Emitido em", value: responsavelModalTicket.criadoEm ? formatDate(responsavelModalTicket.criadoEm) : null },
+                            { label: "Entrada em", value: responsavelModalTicket.usado && responsavelModalTicket.horaEntrada ? formatDate(responsavelModalTicket.horaEntrada) : null },
+                          ].filter(({ value }) => value).map(({ label, value }) => (
+                            <div key={label} className="flex items-center justify-between px-4 py-2.5">
+                              <span className="text-zinc-500 text-xs font-semibold">{label}</span>
+                              <span className="text-white text-xs font-mono">{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2 p-4 border-t border-zinc-800">
+                          <button
+                            onClick={handleToggleValidarResponsavel}
+                            disabled={responsavelModalLoading}
+                            className={`flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+                              responsavelModalTicket.usado
+                                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700"
+                                : "bg-white text-black hover:bg-zinc-200"
+                            }`}
+                          >
+                            {responsavelModalTicket.usado ? (
+                              <><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg> Desvalidar</>
+                            ) : (
+                              <><CheckCircle className="h-3.5 w-3.5" /> Validar</>
+                            )}
+                          </button>
+                          <button
+                            onClick={handleExcluirIngressoResponsavel}
+                            disabled={responsavelModalLoading}
+                            className="h-10 w-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition-all disabled:opacity-50 shrink-0"
+                            title="Excluir ingresso"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Sem ingresso — form para associar */
+                      <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-4 space-y-4">
+                        <p className="text-zinc-500 text-xs">
+                          Este responsável ainda não possui ingresso. Associe um agora:
+                        </p>
+
+                        {/* Lote */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Lote</label>
+                          <select
+                            value={associarResponsavelForm.loteId}
+                            onChange={(e) => setAssociarResponsavelForm((p) => ({ ...p, loteId: e.target.value }))}
+                            className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
+                          >
+                            <option value="" disabled>Selecione o lote</option>
+                            {batches.map((b) => (
+                              <option key={b.id} value={b.id} className="bg-zinc-900">
+                                {b.nome} — R$ {Number(b.preco).toFixed(2).replace(".", ",")}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* E-mail */}
+                        {!responsavelModal.email && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">E-mail (opcional)</label>
+                            <input
+                              type="email"
+                              placeholder="email@exemplo.com"
+                              value={associarResponsavelForm.email}
+                              onChange={(e) => setAssociarResponsavelForm((p) => ({ ...p, email: e.target.value }))}
+                              className="flex h-11 w-full rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                            />
+                          </div>
+                        )}
+
+                        {/* Status + Pagamento */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Status</label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {(["pendente", "validado"] as const).map((s) => (
+                                <button key={s} type="button"
+                                  onClick={() => setAssociarResponsavelForm((p) => ({ ...p, status: s }))}
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${associarResponsavelForm.status === s ? "bg-white text-black" : "bg-black text-zinc-500 hover:text-white"}`}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Pagamento</label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {([false, true] as const).map((v) => (
+                                <button key={String(v)} type="button"
+                                  onClick={() => setAssociarResponsavelForm((p) => ({ ...p, pago: v }))}
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${associarResponsavelForm.pago === v ? "bg-white text-black" : "bg-black text-zinc-500 hover:text-white"}`}
+                                >
+                                  {v ? "Pago" : "Pendente"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => { fetchBatches(); handleAssociarIngressoResponsavel(); }}
+                          disabled={!associarResponsavelForm.loteId || associarResponsavelLoading}
+                          className="w-full h-11 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
+                        >
+                          {associarResponsavelLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <LuTicketPlus className="h-4 w-4" />
+                          )}
+                          Associar Ingresso
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── POP DE CONFIRMAÇÃO: LIMPAR TODOS RESPONSÁVEIS ── */}
+      {confirmLimparResponsaveis && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+          onClick={() => !limparResponsaveisLoading && setConfirmLimparResponsaveis(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl max-w-sm w-full flex flex-col items-center text-center shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
+              <Trash2 className="h-7 w-7" />
+            </div>
+            <h4 className="text-white font-bold text-lg mb-1">Limpar todos os responsáveis?</h4>
+            <p className="text-zinc-500 text-sm mb-1">
+              <span className="text-white font-semibold">{allResponsaveis.length} responsável(is)</span> serão removidos.
+            </p>
+            <p className="text-zinc-600 text-xs mb-6">
+              Esta ação é irreversível. Todos os registros de responsáveis serão excluídos permanentemente do sistema.
+            </p>
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => setConfirmLimparResponsaveis(false)}
+                disabled={limparResponsaveisLoading}
+                className="flex-1 h-11 rounded-xl bg-transparent border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleLimparResponsaveis}
+                disabled={limparResponsaveisLoading}
+                className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {limparResponsaveisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Limpar tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+            {/* ── POP DE CONFIRMAÇÃO: EXCLUIR RESPONSÁVEL ── */}
+      {confirmDeleteResponsavel && responsavelModal && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setConfirmDeleteResponsavel(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl max-w-sm w-full flex flex-col items-center text-center shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
+              <Trash2 className="h-7 w-7" />
+            </div>
+            <h4 className="text-white font-bold text-lg mb-1">Excluir responsável?</h4>
+            <p className="text-zinc-500 text-sm mb-1">
+              <span className="text-white font-semibold">{responsavelModal.nome}</span>
+            </p>
+            <p className="text-zinc-600 text-xs mb-6">
+              Esta ação é irreversível. O responsável será removido permanentemente.
+            </p>
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => setConfirmDeleteResponsavel(false)}
+                disabled={deleteResponsavelLoading}
+                className="flex-1 h-11 rounded-xl bg-transparent border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteResponsavel}
+                disabled={deleteResponsavelLoading}
+                className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {deleteResponsavelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── POP DE CONFIRMAÇÃO: REMOVER RESPONSÁVEL (tela do aluno) ── */}
+      {responsavelToRemove && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setResponsavelToRemove(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl max-w-sm w-full flex flex-col items-center text-center shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
+              <Trash2 className="h-7 w-7" />
+            </div>
+            <h4 className="text-white font-bold text-lg mb-1">Remover responsável</h4>
+            <p className="text-zinc-500 text-sm mb-1">
+              <span className="text-white font-semibold">{responsavelToRemove.nome}</span>
+            </p>
+            <p className="text-zinc-600 text-xs mb-6">
+              Você pode apenas desvincular este responsável do aluno (o cadastro dele
+              continua existindo) ou excluí-lo permanentemente do sistema.
+            </p>
+            <div className="flex flex-col gap-2 w-full">
+              <button
+                onClick={() => handleDesassociarResponsavel(responsavelToRemove)}
+                disabled={removeResponsavelLoading}
+                className="w-full h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-sm font-semibold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all disabled:opacity-50"
+              >
+                {removeResponsavelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Unlink className="h-4 w-4" />
+                )}
+                Desassociar do aluno
+              </button>
+              <button
+                onClick={() => handleExcluirResponsavelFromStudent(responsavelToRemove)}
+                disabled={removeResponsavelLoading}
+                className="w-full h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {removeResponsavelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Excluir permanentemente
+              </button>
+              <button
+                onClick={() => setResponsavelToRemove(null)}
+                disabled={removeResponsavelLoading}
+                className="w-full h-11 rounded-xl bg-transparent border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50 mt-1"
+              >
+                Cancelar
+              </button>
             </div>
           </div>
         </div>
