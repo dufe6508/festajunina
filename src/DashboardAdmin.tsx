@@ -96,6 +96,24 @@ const applyCpfMask = (v) => {
   return c;
 };
 
+// Procura, na coleção "usuarios", uma conta já cadastrada (login) com o
+// CPF informado. Se existir, retorna o UID real dessa conta — assim o
+// ingresso criado pelo admin já nasce vinculado ao login do aluno/pai,
+// sem precisar esperar ele se cadastrar depois.
+const findUserIdByCpf = async (db, cpfDigits) => {
+  if (!cpfDigits) return null;
+  try {
+    const usuariosSnap = await getDocs(collection(db, "usuarios"));
+    let found = null;
+    usuariosSnap.forEach((d) => {
+      if ((d.data().cpf || "").replace(/\D/g, "") === cpfDigits) found = d.id;
+    });
+    return found;
+  } catch {
+    return null;
+  }
+};
+
 // Gera um código único de ingresso em ordem sequencial: FJ-0001, FJ-0002...
 const generateTicketCode = async (db) => {
   const counterRef = doc(db, "config", "ticketCounter");
@@ -315,7 +333,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   // Estados: Importação de Pais/Responsáveis
-  const [importParentSubTab, setImportParentSubTab] = useState<"alunos" | "pais">("alunos");
+  const [importParentSubTab, setImportParentSubTab] = useState<
+    "alunos" | "pais"
+  >("alunos");
   const [importParentFiles, setImportParentFiles] = useState<File[]>([]);
   const [importParentPreview, setImportParentPreview] = useState<any[]>([]);
   const [importParentErrors, setImportParentErrors] = useState<string[]>([]);
@@ -327,7 +347,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     semAluno: number;
   } | null>(null);
   const [importParentDragActive, setImportParentDragActive] = useState(false);
-  const [importParentTypeErrors, setImportParentTypeErrors] = useState<string[]>([]);
+  const [importParentTypeErrors, setImportParentTypeErrors] = useState<
+    string[]
+  >([]);
   const importParentFileRef = useRef<HTMLInputElement>(null);
 
   // Sub-abas da seção de Alunos
@@ -358,32 +380,45 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     metodoPagamento: null as "dinheiro" | null,
   });
   const [associarLoading, setAssociarLoading] = useState(false);
-  const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<any[]>([]);
+  const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<
+    any[]
+  >([]);
 
   // Estados: Responsáveis
-  const [responsavelSearch, setResponsavelSearch] = useState('');
+  const [responsavelSearch, setResponsavelSearch] = useState("");
   const [responsavelResults, setResponsavelResults] = useState<any[]>([]);
-  const [responsavelSearchLoading, setResponsavelSearchLoading] = useState(false);
+  const [responsavelSearchLoading, setResponsavelSearchLoading] =
+    useState(false);
   const [allResponsaveis, setAllResponsaveis] = useState<any[]>([]);
   const [allResponsaveisLoading, setAllResponsaveisLoading] = useState(false);
-  const [confirmLimparResponsaveis, setConfirmLimparResponsaveis] = useState(false);
-  const [limparResponsaveisLoading, setLimparResponsaveisLoading] = useState(false);
+  const [confirmLimparResponsaveis, setConfirmLimparResponsaveis] =
+    useState(false);
+  const [limparResponsaveisLoading, setLimparResponsaveisLoading] =
+    useState(false);
   const [responsavelModal, setResponsavelModal] = useState<any | null>(null);
-  const [responsavelModalTicket, setResponsavelModalTicket] = useState<any | null>(null);
+  const [responsavelModalTicket, setResponsavelModalTicket] = useState<
+    any | null
+  >(null);
   const [responsavelModalLoading, setResponsavelModalLoading] = useState(false);
-  const [confirmDeleteResponsavel, setConfirmDeleteResponsavel] = useState(false);
-  const [deleteResponsavelLoading, setDeleteResponsavelLoading] = useState(false);
+  const [confirmDeleteResponsavel, setConfirmDeleteResponsavel] =
+    useState(false);
+  const [deleteResponsavelLoading, setDeleteResponsavelLoading] =
+    useState(false);
   const [associarResponsavelForm, setAssociarResponsavelForm] = useState({
-    loteId: '',
-    email: '',
-    status: 'pendente',
+    loteId: "",
+    email: "",
+    status: "pendente",
     pago: false,
-    metodoPagamento: null as 'dinheiro' | null,
+    metodoPagamento: null as "dinheiro" | null,
   });
-  const [associarResponsavelLoading, setAssociarResponsavelLoading] = useState(false);
+  const [associarResponsavelLoading, setAssociarResponsavelLoading] =
+    useState(false);
   // Remover responsável a partir da tela do aluno (desassociar ou excluir)
-  const [responsavelToRemove, setResponsavelToRemove] = useState<any | null>(null);
-  const [removeResponsavelLoading, setRemoveResponsavelLoading] = useState(false);
+  const [responsavelToRemove, setResponsavelToRemove] = useState<any | null>(
+    null
+  );
+  const [removeResponsavelLoading, setRemoveResponsavelLoading] =
+    useState(false);
   // Edição do aluno associado ao responsável
   const [editingAlunoAssociado, setEditingAlunoAssociado] = useState(false);
   const [editAlunoSearch, setEditAlunoSearch] = useState("");
@@ -399,7 +434,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     telefone: "",
     relacao: "responsavel",
   });
-  const [editResponsavelErrors, setEditResponsavelErrors] = useState<Record<string, string>>({});
+  const [editResponsavelErrors, setEditResponsavelErrors] = useState<
+    Record<string, string>
+  >({});
   const [savingResponsavelEdit, setSavingResponsavelEdit] = useState(false);
   const [confirmDeleteClass, setConfirmDeleteClass] = useState<string | null>(
     null
@@ -447,8 +484,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   // Estados: Busca de aluno para associar ao pai
   const [parentStudentSearch, setParentStudentSearch] = useState("");
   const [parentStudentResults, setParentStudentResults] = useState<any[]>([]);
-  const [parentStudentSearchLoading, setParentStudentSearchLoading] = useState(false);
-  const [parentAssociatedStudent, setParentAssociatedStudent] = useState<any | null>(null);
+  const [parentStudentSearchLoading, setParentStudentSearchLoading] =
+    useState(false);
+  const [parentAssociatedStudent, setParentAssociatedStudent] = useState<
+    any | null
+  >(null);
   const [parentStudentSearchOpen, setParentStudentSearchOpen] = useState(false);
   const parentStudentSearchRef = useRef<HTMLDivElement>(null);
 
@@ -830,12 +870,28 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
   const normalizeParentRow = (row: any) => {
     const nome =
-      row.responsavel || row.nome || row.nomeresponsavel || row.responsável || row.nomepai || row.nomemae || "";
+      row.responsavel ||
+      row.nome ||
+      row.nomeresponsavel ||
+      row.responsável ||
+      row.nomepai ||
+      row.nomemae ||
+      "";
     const cpf = (row.cpf || row.documento || row.doc || "").replace(/\D/g, "");
     const nomeAluno =
-      row.nomealuno || row.aluno || row.nomедоaluno || row.nomedo_aluno || row.nomedaluno || "";
-    const ano = String(row.ano || row.year || row.serie || "").replace(/[^0-9]/g, "");
-    const turma = (row.turma || row.class || row.sala || "").toUpperCase().replace(/\s/g, "");
+      row.nomealuno ||
+      row.aluno ||
+      row.nomедоaluno ||
+      row.nomedo_aluno ||
+      row.nomedaluno ||
+      "";
+    const ano = String(row.ano || row.year || row.serie || "").replace(
+      /[^0-9]/g,
+      ""
+    );
+    const turma = (row.turma || row.class || row.sala || "")
+      .toUpperCase()
+      .replace(/\s/g, "");
     return {
       nome: String(nome).trim(),
       cpf,
@@ -846,14 +902,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   };
 
   const validateParentRow = (
-    r: { nome: string; cpf: string; nomeAluno: string; ano: string; turma: string },
+    r: {
+      nome: string;
+      cpf: string;
+      nomeAluno: string;
+      ano: string;
+      turma: string;
+    },
     rowNum: number
   ): string | null => {
-    if (!r.nome || r.nome.length < 2) return `Linha ${rowNum}: Nome do responsável inválido ("${r.nome}")`;
-    if (r.cpf.length !== 11) return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
-    if (!r.nomeAluno || r.nomeAluno.length < 2) return `Linha ${rowNum}: Nome do aluno inválido ("${r.nomeAluno}")`;
-    if (!["1", "2", "3"].includes(r.ano)) return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
-    if (!/^[A-L]$/.test(r.turma)) return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
+    if (!r.nome || r.nome.length < 2)
+      return `Linha ${rowNum}: Nome do responsável inválido ("${r.nome}")`;
+    if (r.cpf.length !== 11)
+      return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
+    if (!r.nomeAluno || r.nomeAluno.length < 2)
+      return `Linha ${rowNum}: Nome do aluno inválido ("${r.nomeAluno}")`;
+    if (!["1", "2", "3"].includes(r.ano))
+      return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
+    if (!/^[A-L]$/.test(r.turma))
+      return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
     return null;
   };
 
@@ -890,7 +957,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         setImportParentErrors(["Arquivo(s) vazio(s) ou sem dados."]);
         return;
       }
-      const normalized = allRows.map((r) => ({ ...normalizeParentRow(r), _row: r._row }));
+      const normalized = allRows.map((r) => ({
+        ...normalizeParentRow(r),
+        _row: r._row,
+      }));
       const errors: string[] = [];
       normalized.forEach((r) => {
         const err = validateParentRow(r, r._row);
@@ -904,7 +974,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   };
 
   const handleImportParentSubmit = async () => {
-    if (importParentPreview.length === 0 || importParentErrors.length > 0) return;
+    if (importParentPreview.length === 0 || importParentErrors.length > 0)
+      return;
     setImportParentLoading(true);
     setImportParentResult(null);
 
@@ -921,7 +992,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       const alunosMap: Record<string, any> = {}; // "nomeNormalizado_turmaId" -> alunoData
       const turmasSnap = await getDocs(collection(db, "alunos"));
       for (const turmaDoc of turmasSnap.docs) {
-        const alunosSnap = await getDocs(collection(db, "alunos", turmaDoc.id, "lista"));
+        const alunosSnap = await getDocs(
+          collection(db, "alunos", turmaDoc.id, "lista")
+        );
         alunosSnap.forEach((d) => {
           const data = d.data();
           const nomeNorm = (data.nome || "")
@@ -935,13 +1008,22 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         });
       }
 
-      let success = 0, failed = 0, duplicates = 0, semAluno = 0;
+      let success = 0,
+        failed = 0,
+        duplicates = 0,
+        semAluno = 0;
 
       for (const row of importParentPreview) {
         const err = validateParentRow(row, row._row);
-        if (err) { failed++; continue; }
+        if (err) {
+          failed++;
+          continue;
+        }
 
-        if (cpfsExistentes.has(row.cpf)) { duplicates++; continue; }
+        if (cpfsExistentes.has(row.cpf)) {
+          duplicates++;
+          continue;
+        }
 
         // Tenta localizar o aluno pela combinação nome + turma
         const turmaId = `${row.ano}${row.turma}`;
@@ -973,7 +1055,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             semAluno++;
           }
 
-          const nomeId = row.nome.trim().replace(/\s+/g, "_") + "_" + row.cpf.slice(-4);
+          const nomeId =
+            row.nome.trim().replace(/\s+/g, "_") + "_" + row.cpf.slice(-4);
           await setDoc(doc(db, "responsaveis", nomeId), respData);
           cpfsExistentes.add(row.cpf);
           success++;
@@ -985,7 +1068,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
       setImportParentResult({ success, failed, duplicates, semAluno });
       if (success > 0) {
-        showToast(`${success} responsável(is) importado(s) com sucesso!`, "success");
+        showToast(
+          `${success} responsável(is) importado(s) com sucesso!`,
+          "success"
+        );
       } else {
         showToast("Nenhum responsável importado. Verifique os dados.", "error");
       }
@@ -1087,7 +1173,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           const data = d.data();
           if (
             data.alunoId === nomeId ||
-            (cpfDigits && (data.alunoCpf || "").replace(/\D/g, "") === cpfDigits)
+            (cpfDigits &&
+              (data.alunoCpf || "").replace(/\D/g, "") === cpfDigits)
           ) {
             resps.push({ id: d.id, ...data });
           }
@@ -1131,13 +1218,45 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           : null,
       };
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      // Envia e-mail com o ingresso, para o e-mail já cadastrado no login
+      // do aluno/responsável (se existir) ou para o e-mail informado agora
+      const emailDestino =
+        associarForm.email || studentModal._userData?.email || "";
+      let emailEnviado = false;
+      if (emailDestino) {
+        try {
+          await fetch("https://festajunina-api.vercel.app/api/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: emailDestino,
+              nomeAluno: studentModal.nome,
+              code: uniqueCode,
+              lote: loteSelecionado?.nome || "Acesso Geral",
+              preco: `R$ ${Number(loteSelecionado?.preco || 0)
+                .toFixed(2)
+                .replace(".", ",")}`,
+            }),
+          });
+          emailEnviado = true;
+        } catch (emailErr) {
+          console.warn("E-mail não enviado:", emailErr);
+        }
+      }
+
       setAllTickets((prev) =>
         [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
           (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
         )
       );
       setStudentModalTicket({ id: uniqueCode, ...ticketData });
-      showToast("Ingresso associado com sucesso!", "success");
+      showToast(
+        emailEnviado
+          ? "Ingresso associado e enviado por e-mail com sucesso!"
+          : "Ingresso associado com sucesso! (sem e-mail para envio)",
+        "success"
+      );
     } catch {
       showToast("Erro ao associar ingresso.");
     }
@@ -1509,8 +1628,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   // ── Salva pai/responsável no Firebase ──
   const handleParentCadastro = async () => {
     const errs: Record<string, string> = {};
-    if (parentForm.nome.trim().length < 3)
-      errs.nome = "Mínimo 3 caracteres";
+    if (parentForm.nome.trim().length < 3) errs.nome = "Mínimo 3 caracteres";
     if (!validateCpfFull(parentForm.cpf)) errs.cpf = "CPF inválido";
     if (parentForm.email && !/^\S+@\S+\.\S+$/.test(parentForm.email))
       errs.email = "E-mail inválido";
@@ -1571,7 +1689,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         payload.alunoId = parentAssociatedStudent.id;
         payload.alunoNome = parentAssociatedStudent.nome;
         payload.alunoTurma = parentAssociatedStudent.turmaId;
-        payload.alunoAno = parentAssociatedStudent.ano || parentAssociatedStudent.turmaId?.slice(0, 1) || "";
+        payload.alunoAno =
+          parentAssociatedStudent.ano ||
+          parentAssociatedStudent.turmaId?.slice(0, 1) ||
+          "";
       }
 
       const nomeId = parentForm.nome.trim().replace(/\s+/g, "_");
@@ -1589,7 +1710,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     }
     setParentLoading(false);
   };
-
 
   // ── Busca responsáveis por nome ──
   const searchResponsaveis = async (query: string) => {
@@ -1636,7 +1756,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setLimparResponsaveisLoading(true);
     try {
       const snap = await getDocs(collection(db, "responsaveis"));
-      await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "responsaveis", d.id))));
+      await Promise.all(
+        snap.docs.map((d) => deleteDoc(doc(db, "responsaveis", d.id)))
+      );
       setAllResponsaveis([]);
       setResponsavelResults([]);
       setConfirmLimparResponsaveis(false);
@@ -1657,7 +1779,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setEditingAlunoAssociado(false);
     setEditAlunoSearch("");
     setEditAlunoResults([]);
-    setAssociarResponsavelForm({ loteId: "", email: "", status: "pendente", pago: false, metodoPagamento: null });
+    setAssociarResponsavelForm({
+      loteId: "",
+      email: "",
+      status: "pendente",
+      pago: false,
+      metodoPagamento: null,
+    });
     try {
       const cpfDigits = (resp.cpf || "").replace(/\D/g, "");
       const ticket = allTickets.find(
@@ -1678,12 +1806,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       const uniqueCode = await generateTicketCode(db);
       const usado = associarResponsavelForm.status === "validado";
       const agora = new Date().toISOString();
-      const loteSelecionado = batches.find((b) => b.id === associarResponsavelForm.loteId);
+      const loteSelecionado = batches.find(
+        (b) => b.id === associarResponsavelForm.loteId
+      );
       const ticketData = {
         userId: `manual_${uniqueCode}`,
         nomeAluno: responsavelModal.nome,
         ano: responsavelModal.alunoAno || "",
-        turma: responsavelModal.alunoTurma ? responsavelModal.alunoTurma.slice(1) : "",
+        turma: responsavelModal.alunoTurma
+          ? responsavelModal.alunoTurma.slice(1)
+          : "",
         type: loteSelecionado?.nome || "Acesso Geral",
         qty: 1,
         price: loteSelecionado?.preco || 0,
@@ -1698,7 +1830,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         pagamentoConfirmado: associarResponsavelForm.pago,
         dataPagamento: associarResponsavelForm.pago ? agora : null,
         metodoPagamento: associarResponsavelForm.pago
-          ? associarResponsavelForm.metodoPagamento === "dinheiro" ? "dinheiro" : "pix"
+          ? associarResponsavelForm.metodoPagamento === "dinheiro"
+            ? "dinheiro"
+            : "pix"
           : null,
       };
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
@@ -1726,10 +1860,19 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         usado: novoUsado,
         horaEntrada: novoUsado ? agora : null,
       });
-      const updated = { ...responsavelModalTicket, usado: novoUsado, horaEntrada: novoUsado ? agora : null };
+      const updated = {
+        ...responsavelModalTicket,
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      };
       setResponsavelModalTicket(updated);
-      setAllTickets((prev) => prev.map((t) => (t.id === responsavelModalTicket.id ? updated : t)));
-      showToast(novoUsado ? "Ingresso validado!" : "Validação desfeita!", "success");
+      setAllTickets((prev) =>
+        prev.map((t) => (t.id === responsavelModalTicket.id ? updated : t))
+      );
+      showToast(
+        novoUsado ? "Ingresso validado!" : "Validação desfeita!",
+        "success"
+      );
     } catch {
       showToast("Erro ao atualizar ingresso.");
     }
@@ -1742,7 +1885,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setResponsavelModalLoading(true);
     try {
       await deleteDoc(doc(db, "ingressos", responsavelModalTicket.id));
-      setAllTickets((prev) => prev.filter((t) => t.id !== responsavelModalTicket.id));
+      setAllTickets((prev) =>
+        prev.filter((t) => t.id !== responsavelModalTicket.id)
+      );
       setResponsavelModalTicket(null);
       showToast("Ingresso excluído!", "success");
     } catch {
@@ -1757,8 +1902,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setDeleteResponsavelLoading(true);
     try {
       await deleteDoc(doc(db, "responsaveis", responsavelModal.id));
-      setResponsavelResults((prev) => prev.filter((r) => r.id !== responsavelModal.id));
-      setAllResponsaveis((prev) => prev.filter((r) => r.id !== responsavelModal.id));
+      setResponsavelResults((prev) =>
+        prev.filter((r) => r.id !== responsavelModal.id)
+      );
+      setAllResponsaveis((prev) =>
+        prev.filter((r) => r.id !== responsavelModal.id)
+      );
       setConfirmDeleteResponsavel(false);
       setResponsavelModal(null);
       showToast("Responsável excluído com sucesso!", "success");
@@ -1780,11 +1929,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         alunoAno: deleteField(),
         alunoCpf: deleteField(),
       });
-      setStudentModalResponsaveis((prev) => prev.filter((r) => r.id !== resp.id));
+      setStudentModalResponsaveis((prev) =>
+        prev.filter((r) => r.id !== resp.id)
+      );
       setResponsavelResults((prev) =>
         prev.map((r) =>
           r.id === resp.id
-            ? { ...r, alunoId: undefined, alunoNome: undefined, alunoTurma: undefined, alunoAno: undefined, alunoCpf: undefined }
+            ? {
+                ...r,
+                alunoId: undefined,
+                alunoNome: undefined,
+                alunoTurma: undefined,
+                alunoAno: undefined,
+                alunoCpf: undefined,
+              }
             : r
         )
       );
@@ -1802,7 +1960,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setRemoveResponsavelLoading(true);
     try {
       await deleteDoc(doc(db, "responsaveis", resp.id));
-      setStudentModalResponsaveis((prev) => prev.filter((r) => r.id !== resp.id));
+      setStudentModalResponsaveis((prev) =>
+        prev.filter((r) => r.id !== resp.id)
+      );
       setResponsavelResults((prev) => prev.filter((r) => r.id !== resp.id));
       showToast("Responsável excluído com sucesso!", "success");
     } catch {
@@ -1916,8 +2076,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const handleSaveResponsavelEdit = async () => {
     if (!responsavelModal) return;
     const errs: Record<string, string> = {};
-    if (editResponsavelForm.nome.trim().length < 3) errs.nome = "Mínimo 3 caracteres";
-    if (editResponsavelForm.email && !/^\S+@\S+\.\S+$/.test(editResponsavelForm.email))
+    if (editResponsavelForm.nome.trim().length < 3)
+      errs.nome = "Mínimo 3 caracteres";
+    if (
+      editResponsavelForm.email &&
+      !/^\S+@\S+\.\S+$/.test(editResponsavelForm.email)
+    )
       errs.email = "E-mail inválido";
     if (
       editResponsavelForm.telefone &&
@@ -1934,7 +2098,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       // garante que o aluno não fique com 2 pais ou 2 mães
       if (
         responsavelModal.alunoId &&
-        (editResponsavelForm.relacao === "pai" || editResponsavelForm.relacao === "mae") &&
+        (editResponsavelForm.relacao === "pai" ||
+          editResponsavelForm.relacao === "mae") &&
         editResponsavelForm.relacao !== responsavelModal.relacao
       ) {
         const livre = await checkRelacaoUnica(
@@ -1971,8 +2136,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         telefone: telefoneTrim || null,
       };
       setResponsavelModal(updated);
-      setResponsavelResults((prev) => prev.map((r) => (r.id === responsavelModal.id ? updated : r)));
-      setStudentModalResponsaveis((prev) => prev.map((r) => (r.id === responsavelModal.id ? updated : r)));
+      setResponsavelResults((prev) =>
+        prev.map((r) => (r.id === responsavelModal.id ? updated : r))
+      );
+      setStudentModalResponsaveis((prev) =>
+        prev.map((r) => (r.id === responsavelModal.id ? updated : r))
+      );
       setEditingResponsavel(false);
       showToast("Responsável atualizado com sucesso!", "success");
     } catch (err) {
@@ -2204,8 +2373,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         (b) => b.id === addTicketForm.loteId
       );
 
+      const cpfDigits = addTicketForm.cpf.replace(/\D/g, "");
+      const usuarioExistenteId = await findUserIdByCpf(db, cpfDigits);
+      const userId = usuarioExistenteId || `manual_${uniqueCode}`;
+
       const ticketData = {
-        userId: `manual_${uniqueCode}`,
+        userId,
         nomeAluno: addTicketForm.nomeAluno.trim(),
         ano: addTicketForm.ano,
         turma: addTicketForm.turma,
@@ -2256,7 +2429,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       );
       setUsersMap((prev) => ({
         ...prev,
-        [`manual_${uniqueCode}`]: addTicketForm.cpf,
+        [userId]: addTicketForm.cpf,
       }));
 
       setGeneratedTicket({ id: uniqueCode, ...ticketData });
@@ -4143,7 +4316,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     { key: "classes", label: "Turmas", icon: MdGroups },
                     { key: "responsaveis", label: "Responsáveis", icon: User },
                   ] as {
-                    key: "import" | "manual" | "search" | "classes" | "responsaveis";
+                    key:
+                      | "import"
+                      | "manual"
+                      | "search"
+                      | "classes"
+                      | "responsaveis";
                     label: string;
                     icon: any;
                   }[]
@@ -4192,7 +4370,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       <FileUp className="h-6 w-6 text-white" /> Importar
                     </h1>
                     <p className="text-zinc-400 text-sm mt-1">
-                      Importe planilhas para cadastrar alunos ou responsáveis em massa.
+                      Importe planilhas para cadastrar alunos ou responsáveis em
+                      massa.
                     </p>
                   </div>
 
@@ -4234,643 +4413,811 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   </div>
 
                   {/* ── IMPORTAR ALUNOS ── */}
-                  {importSubTab === "alunos" && (<>
-                  {/* Card de instruções */}
-                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
-                    <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
-                    <div className="space-y-2 text-sm text-zinc-400">
-                      <p className="font-semibold text-white">
-                        Como preparar o arquivo:
-                      </p>
-                      <p>
-                        Salve a planilha como{" "}
-                        <span className="text-white font-semibold">.xlsx</span>{" "}
-                        (Excel) ou{" "}
-                        <span className="text-white font-semibold">.csv</span>.
-                        A primeira linha deve ser o cabeçalho com as colunas:
-                      </p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {["ano", "turma", "nome", "cpf"].map((col) => (
-                          <span
-                            key={col}
-                            className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300"
-                          >
-                            {col}
-                          </span>
-                        ))}
-                      </div>
-                      <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
-                        <li><span className="text-zinc-400">ano</span> — ano escolar (1, 2 ou 3)</li>
-                        <li><span className="text-zinc-400">turma</span> — letra da turma (A até L)</li>
-                        <li><span className="text-zinc-400">nome</span> — nome completo do aluno</li>
-                        <li><span className="text-zinc-400">cpf</span> — CPF somente números (11 dígitos)</li>
-                      </ul>
-                      <p className="text-zinc-600 text-xs">
-                        Múltiplas planilhas podem ser importadas ao mesmo tempo. Alunos com CPF já cadastrado são ignorados.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Zona de drag & drop */}
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setImportDragActive(true);
-                    }}
-                    onDragLeave={() => setImportDragActive(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setImportDragActive(false);
-                      if (e.dataTransfer.files.length > 0)
-                        handleImportFilesChange(e.dataTransfer.files);
-                    }}
-                    onClick={() => importFileRef.current?.click()}
-                    className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
-                      importDragActive
-                        ? "border-white bg-white/5"
-                        : importFiles.length > 0
-                        ? "border-zinc-600 bg-[#0a0a0a]"
-                        : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
-                    }`}
-                  >
-                    <input
-                      ref={importFileRef}
-                      type="file"
-                      accept=".csv,.xlsx"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files.length > 0)
-                          handleImportFilesChange(e.target.files);
-                      }}
-                    />
-                    {importFiles.length > 0 ? (
-                      <>
-                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          <FileSpreadsheet className="h-7 w-7 text-white" />
-                        </div>
-                        <div className="text-center">
-                          {importFiles.length === 1 ? (
-                            <>
-                              <p className="text-white font-semibold text-sm">
-                                {importFiles[0].name}
-                              </p>
-                              <p className="text-zinc-500 text-xs mt-1">
-                                {(importFiles[0].size / 1024).toFixed(1)} KB
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-white font-semibold text-sm">
-                                {importFiles.length} arquivos selecionados
-                              </p>
-                              <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
-                                {importFiles.map((f, i) => (
-                                  <p
-                                    key={i}
-                                    className="text-zinc-500 text-xs font-mono"
-                                  >
-                                    {f.name}{" "}
-                                    <span className="text-zinc-700">
-                                      ({(f.size / 1024).toFixed(1)} KB)
-                                    </span>
-                                  </p>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setImportFiles([]);
-                            setImportPreview([]);
-                            setImportErrors([]);
-                            setImportResult(null);
-                            setImportTypeErrors([]);
-                          }}
-                          className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
-                        >
-                          Remover arquivo(s)
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                          <FileUp className="h-7 w-7 text-zinc-500" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-white font-semibold text-sm">
-                            Arraste os arquivos aqui
+                  {importSubTab === "alunos" && (
+                    <>
+                      {/* Card de instruções */}
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                        <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                        <div className="space-y-2 text-sm text-zinc-400">
+                          <p className="font-semibold text-white">
+                            Como preparar o arquivo:
                           </p>
-                          <p className="text-zinc-500 text-xs mt-1">
-                            ou clique para selecionar — somente .csv ou .xlsx
+                          <p>
+                            Salve a planilha como{" "}
+                            <span className="text-white font-semibold">
+                              .xlsx
+                            </span>{" "}
+                            (Excel) ou{" "}
+                            <span className="text-white font-semibold">
+                              .csv
+                            </span>
+                            . A primeira linha deve ser o cabeçalho com as
+                            colunas:
                           </p>
-                          <p className="text-zinc-600 text-xs mt-0.5">
-                            Múltiplos arquivos permitidos
-                          </p>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Erros de tipo de arquivo */}
-                  {importTypeErrors.length > 0 && (
-                    <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <AlertTriangle className="h-4 w-4 text-orange-400" />
-                        <p className="text-sm font-bold text-orange-400">
-                          Arquivo(s) não aceito(s)
-                        </p>
-                      </div>
-                      <ul className="space-y-1">
-                        {importTypeErrors.map((err, i) => (
-                          <li
-                            key={i}
-                            className="text-xs text-orange-300 font-mono"
-                          >
-                            {err}
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="text-xs text-zinc-500 mt-3">
-                        Apenas arquivos{" "}
-                        <span className="text-zinc-300 font-semibold">
-                          .csv
-                        </span>{" "}
-                        e{" "}
-                        <span className="text-zinc-300 font-semibold">
-                          .xlsx
-                        </span>{" "}
-                        são suportados.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Preview dos dados */}
-                  {importPreview.length > 0 && (
-                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-                        <p className="text-sm font-bold text-white">
-                          Pré-visualização
-                        </p>
-                        <span className="text-xs text-zinc-500">
-                          {importPreview.length} registros
-                        </span>
-                      </div>
-                      <div
-                        className="overflow-y-auto"
-                        style={{
-                          maxHeight: "480px",
-                          scrollbarWidth: "thin",
-                          scrollbarColor: "#3f3f46 transparent",
-                        }}
-                      >
-                        <table className="w-full text-sm border-collapse">
-                          <colgroup>
-                            <col style={{ width: "40px" }} />
-                            <col style={{ width: "64px" }} />
-                            <col style={{ width: "80px" }} />
-                            <col />
-                            <col style={{ width: "160px" }} />
-                            <col style={{ width: "44px" }} />
-                          </colgroup>
-                          <thead className="sticky top-0 bg-[#0a0a0a] z-10">
-                            <tr className="border-b border-zinc-800">
-                              <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                                #
-                              </th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                Ano
-                              </th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                Turma
-                              </th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                Nome
-                              </th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                CPF
-                              </th>
-                              <th className="px-3 py-3 border-l border-zinc-800/60"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {importPreview.map((row, i) => {
-                              const err = validateRow(row, row._row);
-                              return (
-                                <tr
-                                  key={i}
-                                  className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
-                                    err ? "bg-red-500/5" : ""
-                                  }`}
-                                >
-                                  <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
-                                    {i + 1}
-                                  </td>
-                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                    {row.ano || "—"}
-                                  </td>
-                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                    {row.turma || "—"}
-                                  </td>
-                                  <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
-                                    {row.nome || "—"}
-                                  </td>
-                                  <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40 tabular-nums">
-                                    {row.cpf
-                                      ? `${row.cpf.slice(0, 3)}.${row.cpf.slice(
-                                          3,
-                                          6
-                                        )}.${row.cpf.slice(
-                                          6,
-                                          9
-                                        )}-${row.cpf.slice(9)}`
-                                      : "—"}
-                                  </td>
-                                  <td className="px-3 py-3 border-l border-zinc-800/40">
-                                    {err ? (
-                                      <XCircle className="h-3.5 w-3.5 text-red-400/70" />
-                                    ) : (
-                                      <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Erros de validação */}
-                  {importErrors.length > 0 && (
-                    <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <XCircle className="h-4 w-4 text-red-400" />
-                        <p className="text-sm font-bold text-red-400">
-                          {importErrors.length} erro(s) encontrado(s)
-                        </p>
-                      </div>
-                      <ul className="space-y-1 max-h-32 overflow-y-auto">
-                        {importErrors.map((err, i) => (
-                          <li
-                            key={i}
-                            className="text-xs text-red-300 font-mono"
-                          >
-                            {err}
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="text-xs text-zinc-500 mt-3">
-                        Corrija os erros no arquivo e reimporte para continuar.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Resultado da importação */}
-                  {importResult && (
-                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
-                      <div className="flex items-center gap-3 mb-6">
-                        <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          <CheckCircle className="h-4 w-4 text-zinc-300" />
-                        </div>
-                        <div>
-                          <p className="text-white font-semibold text-sm">
-                            Importação concluída
-                          </p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {["ano", "turma", "nome", "cpf"].map((col) => (
+                              <span
+                                key={col}
+                                className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300"
+                              >
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                          <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
+                            <li>
+                              <span className="text-zinc-400">ano</span> — ano
+                              escolar (1, 2 ou 3)
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">turma</span> —
+                              letra da turma (A até L)
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">nome</span> — nome
+                              completo do aluno
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">cpf</span> — CPF
+                              somente números (11 dígitos)
+                            </li>
+                          </ul>
                           <p className="text-zinc-600 text-xs">
-                            Alunos cadastrados no Firebase
+                            Múltiplas planilhas podem ser importadas ao mesmo
+                            tempo. Alunos com CPF já cadastrado são ignorados.
                           </p>
                         </div>
                       </div>
-                      <div className="grid grid-cols-3 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-white tabular-nums">
-                            {importResult.success}
-                          </p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">
-                            Cadastrados
-                          </p>
-                        </div>
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-zinc-400 tabular-nums">
-                            {importResult.duplicates}
-                          </p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
-                            Duplicatas
-                          </p>
-                        </div>
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-zinc-400 tabular-nums">
-                            {importResult.failed}
-                          </p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
-                            Falhas
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setImportFiles([]);
-                          setImportPreview([]);
-                          setImportErrors([]);
-                          setImportResult(null);
-                          setImportTypeErrors([]);
-                        }}
-                        className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
-                      >
-                        Importar outra planilha
-                      </button>
-                    </div>
-                  )}
 
-                  {/* Botão importar */}
-                  {importFiles.length > 0 &&
-                    importErrors.length === 0 &&
-                    !importResult && (
-                      <button
-                        onClick={handleImportSubmit}
-                        disabled={importLoading}
-                        className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                      {/* Zona de drag & drop */}
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setImportDragActive(true);
+                        }}
+                        onDragLeave={() => setImportDragActive(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setImportDragActive(false);
+                          if (e.dataTransfer.files.length > 0)
+                            handleImportFilesChange(e.dataTransfer.files);
+                        }}
+                        onClick={() => importFileRef.current?.click()}
+                        className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                          importDragActive
+                            ? "border-white bg-white/5"
+                            : importFiles.length > 0
+                            ? "border-zinc-600 bg-[#0a0a0a]"
+                            : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                        }`}
                       >
-                        {importLoading ? (
+                        <input
+                          ref={importFileRef}
+                          type="file"
+                          accept=".csv,.xlsx"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0)
+                              handleImportFilesChange(e.target.files);
+                          }}
+                        />
+                        {importFiles.length > 0 ? (
                           <>
-                            <Loader2 className="h-5 w-5 animate-spin" />{" "}
-                            Importando alunos...
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <FileSpreadsheet className="h-7 w-7 text-white" />
+                            </div>
+                            <div className="text-center">
+                              {importFiles.length === 1 ? (
+                                <>
+                                  <p className="text-white font-semibold text-sm">
+                                    {importFiles[0].name}
+                                  </p>
+                                  <p className="text-zinc-500 text-xs mt-1">
+                                    {(importFiles[0].size / 1024).toFixed(1)} KB
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-white font-semibold text-sm">
+                                    {importFiles.length} arquivos selecionados
+                                  </p>
+                                  <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
+                                    {importFiles.map((f, i) => (
+                                      <p
+                                        key={i}
+                                        className="text-zinc-500 text-xs font-mono"
+                                      >
+                                        {f.name}{" "}
+                                        <span className="text-zinc-700">
+                                          ({(f.size / 1024).toFixed(1)} KB)
+                                        </span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setImportFiles([]);
+                                setImportPreview([]);
+                                setImportErrors([]);
+                                setImportResult(null);
+                                setImportTypeErrors([]);
+                              }}
+                              className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                            >
+                              Remover arquivo(s)
+                            </button>
                           </>
                         ) : (
                           <>
-                            <FileUp className="h-5 w-5" /> Importar{" "}
-                            {importFiles.length > 1
-                              ? `${importFiles.length} Planilhas`
-                              : "Alunos"}
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                              <FileUp className="h-7 w-7 text-zinc-500" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-white font-semibold text-sm">
+                                Arraste os arquivos aqui
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-1">
+                                ou clique para selecionar — somente .csv ou
+                                .xlsx
+                              </p>
+                              <p className="text-zinc-600 text-xs mt-0.5">
+                                Múltiplos arquivos permitidos
+                              </p>
+                            </div>
                           </>
                         )}
-                      </button>
-                    )}
-                  </>)}
+                      </div>
 
-                  {/* ── IMPORTAR PAIS/RESPONSÁVEIS ── */}
-                  {importSubTab === "pais" && (<>
-                  {/* Card de instruções */}
-                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
-                    <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
-                    <div className="space-y-2 text-sm text-zinc-400">
-                      <p className="font-semibold text-white">Como preparar o arquivo:</p>
-                      <p>
-                        A planilha deve ter as colunas abaixo. O sistema tentará
-                        vincular automaticamente ao aluno pelo nome e turma.
-                      </p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {["Responsavel", "CPF", "Nome do Aluno", "Ano", "Turma"].map((col) => (
-                          <span key={col} className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300">
-                            {col}
-                          </span>
-                        ))}
-                      </div>
-                      <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
-                        <li><span className="text-zinc-400">Responsavel</span> — nome do pai/mãe/responsável</li>
-                        <li><span className="text-zinc-400">CPF</span> — CPF do responsável (com ou sem pontuação)</li>
-                        <li><span className="text-zinc-400">Nome do Aluno</span> — nome do aluno já cadastrado no sistema</li>
-                        <li><span className="text-zinc-400">Ano</span> — ano escolar do aluno (1, 2 ou 3)</li>
-                        <li><span className="text-zinc-400">Turma</span> — letra da turma do aluno (A até L)</li>
-                      </ul>
-                      <p className="text-zinc-600 text-xs">
-                        Se o aluno não for encontrado, o responsável é cadastrado sem vínculo.
-                        Responsáveis com CPF já cadastrado são ignorados.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Zona de drag & drop - Pais */}
-                  <div
-                    onDragOver={(e) => { e.preventDefault(); setImportParentDragActive(true); }}
-                    onDragLeave={() => setImportParentDragActive(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setImportParentDragActive(false);
-                      if (e.dataTransfer.files.length > 0)
-                        handleImportParentFilesChange(e.dataTransfer.files);
-                    }}
-                    onClick={() => importParentFileRef.current?.click()}
-                    className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
-                      importParentDragActive
-                        ? "border-white bg-white/5"
-                        : importParentFiles.length > 0
-                        ? "border-zinc-600 bg-[#0a0a0a]"
-                        : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
-                    }`}
-                  >
-                    <input
-                      ref={importParentFileRef}
-                      type="file"
-                      accept=".csv,.xlsx"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files.length > 0)
-                          handleImportParentFilesChange(e.target.files);
-                      }}
-                    />
-                    {importParentFiles.length > 0 ? (
-                      <>
-                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          <FileSpreadsheet className="h-7 w-7 text-white" />
-                        </div>
-                        <div className="text-center">
-                          {importParentFiles.length === 1 ? (
-                            <>
-                              <p className="text-white font-semibold text-sm">{importParentFiles[0].name}</p>
-                              <p className="text-zinc-500 text-xs mt-1">{(importParentFiles[0].size / 1024).toFixed(1)} KB</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-white font-semibold text-sm">{importParentFiles.length} arquivos selecionados</p>
-                              <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
-                                {importParentFiles.map((f, i) => (
-                                  <p key={i} className="text-zinc-500 text-xs font-mono">
-                                    {f.name} <span className="text-zinc-700">({(f.size / 1024).toFixed(1)} KB)</span>
-                                  </p>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setImportParentFiles([]);
-                            setImportParentPreview([]);
-                            setImportParentErrors([]);
-                            setImportParentResult(null);
-                            setImportParentTypeErrors([]);
-                          }}
-                          className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
-                        >
-                          Remover arquivo(s)
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                          <FileUp className="h-7 w-7 text-zinc-500" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-white font-semibold text-sm">Arraste os arquivos aqui</p>
-                          <p className="text-zinc-500 text-xs mt-1">ou clique para selecionar — somente .csv ou .xlsx</p>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Erros de tipo */}
-                  {importParentTypeErrors.length > 0 && (
-                    <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <AlertTriangle className="h-4 w-4 text-orange-400" />
-                        <p className="text-sm font-bold text-orange-400">Arquivo(s) não aceito(s)</p>
-                      </div>
-                      <ul className="space-y-1">
-                        {importParentTypeErrors.map((err, i) => (
-                          <li key={i} className="text-xs text-orange-300 font-mono">{err}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Preview */}
-                  {importParentPreview.length > 0 && (
-                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-                        <p className="text-sm font-bold text-white">Pré-visualização</p>
-                        <span className="text-xs text-zinc-500">{importParentPreview.length} registros</span>
-                      </div>
-                      <div className="overflow-y-auto" style={{ maxHeight: "400px", scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}>
-                        <table className="w-full text-sm border-collapse">
-                          <thead className="sticky top-0 bg-[#0a0a0a] z-10">
-                            <tr className="border-b border-zinc-800">
-                              <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">#</th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Responsável</th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">CPF</th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Aluno</th>
-                              <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">Turma</th>
-                              <th className="px-3 py-3 border-l border-zinc-800/60"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {importParentPreview.map((row, i) => {
-                              const err = validateParentRow(row, row._row);
-                              return (
-                                <tr key={i} className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${err ? "bg-red-500/5" : ""}`}>
-                                  <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600">{i + 1}</td>
-                                  <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">{row.nome || "—"}</td>
-                                  <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40">
-                                    {row.cpf ? formatCpf(row.cpf) : "—"}
-                                  </td>
-                                  <td className="px-4 py-3 text-zinc-300 text-sm border-l border-zinc-800/40">{row.nomeAluno || "—"}</td>
-                                  <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                    {row.ano && row.turma ? `${row.ano}${row.turma}` : "—"}
-                                  </td>
-                                  <td className="px-3 py-3 border-l border-zinc-800/40">
-                                    {err ? <XCircle className="h-3.5 w-3.5 text-red-400/70" /> : <CheckCircle className="h-3.5 w-3.5 text-green-500" />}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Erros de validação */}
-                  {importParentErrors.length > 0 && (
-                    <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <XCircle className="h-4 w-4 text-red-400" />
-                        <p className="text-sm font-bold text-red-400">{importParentErrors.length} erro(s) encontrado(s)</p>
-                      </div>
-                      <ul className="space-y-1 max-h-32 overflow-y-auto">
-                        {importParentErrors.map((err, i) => (
-                          <li key={i} className="text-xs text-red-300 font-mono">{err}</li>
-                        ))}
-                      </ul>
-                      <p className="text-xs text-zinc-500 mt-3">Corrija os erros no arquivo e reimporte para continuar.</p>
-                    </div>
-                  )}
-
-                  {/* Resultado */}
-                  {importParentResult && (
-                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
-                      <div className="flex items-center gap-3 mb-6">
-                        <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                          <CheckCircle className="h-4 w-4 text-zinc-300" />
-                        </div>
-                        <div>
-                          <p className="text-white font-semibold text-sm">Importação concluída</p>
-                          <p className="text-zinc-600 text-xs">Responsáveis cadastrados no Firebase</p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-4 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-white tabular-nums">{importParentResult.success}</p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">Cadastrados</p>
-                        </div>
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-zinc-400 tabular-nums">{importParentResult.duplicates}</p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Duplicatas</p>
-                        </div>
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-yellow-400 tabular-nums">{importParentResult.semAluno}</p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Sem vínculo</p>
-                        </div>
-                        <div className="p-4 text-center">
-                          <p className="text-2xl font-black text-zinc-400 tabular-nums">{importParentResult.failed}</p>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">Falhas</p>
-                        </div>
-                      </div>
-                      {importParentResult.semAluno > 0 && (
-                        <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
-                          <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
-                          <p className="text-xs text-yellow-300">
-                            {importParentResult.semAluno} responsável(is) foram cadastrados sem vínculo com aluno
-                            porque o nome ou turma não coincidiu com registros existentes.
-                            Você pode editar o vínculo manualmente na aba Responsáveis.
+                      {/* Erros de tipo de arquivo */}
+                      {importTypeErrors.length > 0 && (
+                        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="h-4 w-4 text-orange-400" />
+                            <p className="text-sm font-bold text-orange-400">
+                              Arquivo(s) não aceito(s)
+                            </p>
+                          </div>
+                          <ul className="space-y-1">
+                            {importTypeErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-orange-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="text-xs text-zinc-500 mt-3">
+                            Apenas arquivos{" "}
+                            <span className="text-zinc-300 font-semibold">
+                              .csv
+                            </span>{" "}
+                            e{" "}
+                            <span className="text-zinc-300 font-semibold">
+                              .xlsx
+                            </span>{" "}
+                            são suportados.
                           </p>
                         </div>
                       )}
-                      <button
-                        onClick={() => {
-                          setImportParentFiles([]);
-                          setImportParentPreview([]);
-                          setImportParentErrors([]);
-                          setImportParentResult(null);
-                          setImportParentTypeErrors([]);
-                        }}
-                        className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
-                      >
-                        Importar outra planilha
-                      </button>
-                    </div>
+
+                      {/* Preview dos dados */}
+                      {importPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importPreview.length} registros
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{
+                              maxHeight: "480px",
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#3f3f46 transparent",
+                            }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <colgroup>
+                                <col style={{ width: "40px" }} />
+                                <col style={{ width: "64px" }} />
+                                <col style={{ width: "80px" }} />
+                                <col />
+                                <col style={{ width: "160px" }} />
+                                <col style={{ width: "44px" }} />
+                              </colgroup>
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="border-b border-zinc-800">
+                                  <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                    #
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Ano
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Turma
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Nome
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    CPF
+                                  </th>
+                                  <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importPreview.map((row, i) => {
+                                  const err = validateRow(row, row._row);
+                                  return (
+                                    <tr
+                                      key={i}
+                                      className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                        err ? "bg-red-500/5" : ""
+                                      }`}
+                                    >
+                                      <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
+                                        {i + 1}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.ano || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.turma || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                        {row.nome || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40 tabular-nums">
+                                        {row.cpf
+                                          ? `${row.cpf.slice(
+                                              0,
+                                              3
+                                            )}.${row.cpf.slice(
+                                              3,
+                                              6
+                                            )}.${row.cpf.slice(
+                                              6,
+                                              9
+                                            )}-${row.cpf.slice(9)}`
+                                          : "—"}
+                                      </td>
+                                      <td className="px-3 py-3 border-l border-zinc-800/40">
+                                        {err ? (
+                                          <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                        ) : (
+                                          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Erros de validação */}
+                      {importErrors.length > 0 && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <XCircle className="h-4 w-4 text-red-400" />
+                            <p className="text-sm font-bold text-red-400">
+                              {importErrors.length} erro(s) encontrado(s)
+                            </p>
+                          </div>
+                          <ul className="space-y-1 max-h-32 overflow-y-auto">
+                            {importErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-red-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="text-xs text-zinc-500 mt-3">
+                            Corrija os erros no arquivo e reimporte para
+                            continuar.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Resultado da importação */}
+                      {importResult && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
+                          <div className="flex items-center gap-3 mb-6">
+                            <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <CheckCircle className="h-4 w-4 text-zinc-300" />
+                            </div>
+                            <div>
+                              <p className="text-white font-semibold text-sm">
+                                Importação concluída
+                              </p>
+                              <p className="text-zinc-600 text-xs">
+                                Alunos cadastrados no Firebase
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-white tabular-nums">
+                                {importResult.success}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">
+                                Cadastrados
+                              </p>
+                            </div>
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                                {importResult.duplicates}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                                Duplicatas
+                              </p>
+                            </div>
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                                {importResult.failed}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                                Falhas
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setImportFiles([]);
+                              setImportPreview([]);
+                              setImportErrors([]);
+                              setImportResult(null);
+                              setImportTypeErrors([]);
+                            }}
+                            className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                          >
+                            Importar outra planilha
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Botão importar */}
+                      {importFiles.length > 0 &&
+                        importErrors.length === 0 &&
+                        !importResult && (
+                          <button
+                            onClick={handleImportSubmit}
+                            disabled={importLoading}
+                            className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                          >
+                            {importLoading ? (
+                              <>
+                                <Loader2 className="h-5 w-5 animate-spin" />{" "}
+                                Importando alunos...
+                              </>
+                            ) : (
+                              <>
+                                <FileUp className="h-5 w-5" /> Importar{" "}
+                                {importFiles.length > 1
+                                  ? `${importFiles.length} Planilhas`
+                                  : "Alunos"}
+                              </>
+                            )}
+                          </button>
+                        )}
+                    </>
                   )}
 
-                  {/* Botão importar */}
-                  {importParentFiles.length > 0 && importParentErrors.length === 0 && !importParentResult && (
-                    <button
-                      onClick={handleImportParentSubmit}
-                      disabled={importParentLoading}
-                      className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
-                    >
-                      {importParentLoading ? (
-                        <><Loader2 className="h-5 w-5 animate-spin" /> Importando responsáveis...</>
-                      ) : (
-                        <><FileUp className="h-5 w-5" /> Importar {importParentFiles.length > 1 ? `${importParentFiles.length} Planilhas` : "Responsáveis"}</>
+                  {/* ── IMPORTAR PAIS/RESPONSÁVEIS ── */}
+                  {importSubTab === "pais" && (
+                    <>
+                      {/* Card de instruções */}
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                        <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                        <div className="space-y-2 text-sm text-zinc-400">
+                          <p className="font-semibold text-white">
+                            Como preparar o arquivo:
+                          </p>
+                          <p>
+                            A planilha deve ter as colunas abaixo. O sistema
+                            tentará vincular automaticamente ao aluno pelo nome
+                            e turma.
+                          </p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {[
+                              "Responsavel",
+                              "CPF",
+                              "Nome do Aluno",
+                              "Ano",
+                              "Turma",
+                            ].map((col) => (
+                              <span
+                                key={col}
+                                className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300"
+                              >
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                          <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
+                            <li>
+                              <span className="text-zinc-400">Responsavel</span>{" "}
+                              — nome do pai/mãe/responsável
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">CPF</span> — CPF
+                              do responsável (com ou sem pontuação)
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">
+                                Nome do Aluno
+                              </span>{" "}
+                              — nome do aluno já cadastrado no sistema
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">Ano</span> — ano
+                              escolar do aluno (1, 2 ou 3)
+                            </li>
+                            <li>
+                              <span className="text-zinc-400">Turma</span> —
+                              letra da turma do aluno (A até L)
+                            </li>
+                          </ul>
+                          <p className="text-zinc-600 text-xs">
+                            Se o aluno não for encontrado, o responsável é
+                            cadastrado sem vínculo. Responsáveis com CPF já
+                            cadastrado são ignorados.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Zona de drag & drop - Pais */}
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setImportParentDragActive(true);
+                        }}
+                        onDragLeave={() => setImportParentDragActive(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setImportParentDragActive(false);
+                          if (e.dataTransfer.files.length > 0)
+                            handleImportParentFilesChange(e.dataTransfer.files);
+                        }}
+                        onClick={() => importParentFileRef.current?.click()}
+                        className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                          importParentDragActive
+                            ? "border-white bg-white/5"
+                            : importParentFiles.length > 0
+                            ? "border-zinc-600 bg-[#0a0a0a]"
+                            : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                        }`}
+                      >
+                        <input
+                          ref={importParentFileRef}
+                          type="file"
+                          accept=".csv,.xlsx"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0)
+                              handleImportParentFilesChange(e.target.files);
+                          }}
+                        />
+                        {importParentFiles.length > 0 ? (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <FileSpreadsheet className="h-7 w-7 text-white" />
+                            </div>
+                            <div className="text-center">
+                              {importParentFiles.length === 1 ? (
+                                <>
+                                  <p className="text-white font-semibold text-sm">
+                                    {importParentFiles[0].name}
+                                  </p>
+                                  <p className="text-zinc-500 text-xs mt-1">
+                                    {(importParentFiles[0].size / 1024).toFixed(
+                                      1
+                                    )}{" "}
+                                    KB
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-white font-semibold text-sm">
+                                    {importParentFiles.length} arquivos
+                                    selecionados
+                                  </p>
+                                  <div className="mt-2 space-y-0.5 max-h-24 overflow-y-auto">
+                                    {importParentFiles.map((f, i) => (
+                                      <p
+                                        key={i}
+                                        className="text-zinc-500 text-xs font-mono"
+                                      >
+                                        {f.name}{" "}
+                                        <span className="text-zinc-700">
+                                          ({(f.size / 1024).toFixed(1)} KB)
+                                        </span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setImportParentFiles([]);
+                                setImportParentPreview([]);
+                                setImportParentErrors([]);
+                                setImportParentResult(null);
+                                setImportParentTypeErrors([]);
+                              }}
+                              className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                            >
+                              Remover arquivo(s)
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                              <FileUp className="h-7 w-7 text-zinc-500" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-white font-semibold text-sm">
+                                Arraste os arquivos aqui
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-1">
+                                ou clique para selecionar — somente .csv ou
+                                .xlsx
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Erros de tipo */}
+                      {importParentTypeErrors.length > 0 && (
+                        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="h-4 w-4 text-orange-400" />
+                            <p className="text-sm font-bold text-orange-400">
+                              Arquivo(s) não aceito(s)
+                            </p>
+                          </div>
+                          <ul className="space-y-1">
+                            {importParentTypeErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-orange-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
-                    </button>
+
+                      {/* Preview */}
+                      {importParentPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importParentPreview.length} registros
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{
+                              maxHeight: "400px",
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#3f3f46 transparent",
+                            }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="border-b border-zinc-800">
+                                  <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                    #
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Responsável
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    CPF
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Aluno
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Turma
+                                  </th>
+                                  <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importParentPreview.map((row, i) => {
+                                  const err = validateParentRow(row, row._row);
+                                  return (
+                                    <tr
+                                      key={i}
+                                      className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                        err ? "bg-red-500/5" : ""
+                                      }`}
+                                    >
+                                      <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600">
+                                        {i + 1}
+                                      </td>
+                                      <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                        {row.nome || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40">
+                                        {row.cpf ? formatCpf(row.cpf) : "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-zinc-300 text-sm border-l border-zinc-800/40">
+                                        {row.nomeAluno || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.ano && row.turma
+                                          ? `${row.ano}${row.turma}`
+                                          : "—"}
+                                      </td>
+                                      <td className="px-3 py-3 border-l border-zinc-800/40">
+                                        {err ? (
+                                          <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                        ) : (
+                                          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Erros de validação */}
+                      {importParentErrors.length > 0 && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <XCircle className="h-4 w-4 text-red-400" />
+                            <p className="text-sm font-bold text-red-400">
+                              {importParentErrors.length} erro(s) encontrado(s)
+                            </p>
+                          </div>
+                          <ul className="space-y-1 max-h-32 overflow-y-auto">
+                            {importParentErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-red-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="text-xs text-zinc-500 mt-3">
+                            Corrija os erros no arquivo e reimporte para
+                            continuar.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Resultado */}
+                      {importParentResult && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6 animate-in zoom-in-95 duration-200">
+                          <div className="flex items-center gap-3 mb-6">
+                            <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <CheckCircle className="h-4 w-4 text-zinc-300" />
+                            </div>
+                            <div>
+                              <p className="text-white font-semibold text-sm">
+                                Importação concluída
+                              </p>
+                              <p className="text-zinc-600 text-xs">
+                                Responsáveis cadastrados no Firebase
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-4 divide-x divide-zinc-800 border border-zinc-800 rounded-xl overflow-hidden">
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-white tabular-nums">
+                                {importParentResult.success}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">
+                                Cadastrados
+                              </p>
+                            </div>
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                                {importParentResult.duplicates}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                                Duplicatas
+                              </p>
+                            </div>
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-yellow-400 tabular-nums">
+                                {importParentResult.semAluno}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                                Sem vínculo
+                              </p>
+                            </div>
+                            <div className="p-4 text-center">
+                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                                {importParentResult.failed}
+                              </p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
+                                Falhas
+                              </p>
+                            </div>
+                          </div>
+                          {importParentResult.semAluno > 0 && (
+                            <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
+                              <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+                              <p className="text-xs text-yellow-300">
+                                {importParentResult.semAluno} responsável(is)
+                                foram cadastrados sem vínculo com aluno porque o
+                                nome ou turma não coincidiu com registros
+                                existentes. Você pode editar o vínculo
+                                manualmente na aba Responsáveis.
+                              </p>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              setImportParentFiles([]);
+                              setImportParentPreview([]);
+                              setImportParentErrors([]);
+                              setImportParentResult(null);
+                              setImportParentTypeErrors([]);
+                            }}
+                            className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                          >
+                            Importar outra planilha
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Botão importar */}
+                      {importParentFiles.length > 0 &&
+                        importParentErrors.length === 0 &&
+                        !importParentResult && (
+                          <button
+                            onClick={handleImportParentSubmit}
+                            disabled={importParentLoading}
+                            className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                          >
+                            {importParentLoading ? (
+                              <>
+                                <Loader2 className="h-5 w-5 animate-spin" />{" "}
+                                Importando responsáveis...
+                              </>
+                            ) : (
+                              <>
+                                <FileUp className="h-5 w-5" /> Importar{" "}
+                                {importParentFiles.length > 1
+                                  ? `${importParentFiles.length} Planilhas`
+                                  : "Responsáveis"}
+                              </>
+                            )}
+                          </button>
+                        )}
+                    </>
                   )}
-                  </>)}
                 </div>
               )}
 
@@ -4951,266 +5298,32 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   {/* ── FORM: ALUNO ── */}
                   {manualType === "aluno" && (
                     <>
-                  {/* Feedback da última sala cadastrada */}
-                  {manualSuccessSala && (
-                    <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 flex items-center gap-3">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
-                      <p className="text-emerald-300 text-sm">
-                        Aluno associado à sala{" "}
-                        <span className="font-bold">{manualSuccessSala}</span>.
-                        Você pode cadastrar outro abaixo.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
-                    {/* Preview da sala */}
-                    {manualForm.ano && manualForm.turma && (
-                      <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center gap-2">
-                        <MdGroups className="h-4 w-4 text-zinc-400" />
-                        <span className="text-zinc-400 text-sm">
-                          Será associado à sala{" "}
-                          <span className="text-white font-bold">
-                            {manualForm.ano}
-                            {manualForm.turma}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="p-5 space-y-4">
-                      {/* Nome */}
-                      <div className="space-y-1.5">
-                        <Label>
-                          Nome do Aluno <span className="text-red-500">*</span>
-                        </Label>
-                        <Input
-                          name="nomeAluno"
-                          value={manualForm.nomeAluno}
-                          onChange={handleManualFormChange}
-                          placeholder="Nome completo do aluno"
-                          error={!!manualErrors.nomeAluno}
-                        />
-                        {manualErrors.nomeAluno && (
-                          <p className="text-red-400 text-xs flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3 shrink-0" />
-                            {manualErrors.nomeAluno}
+                      {/* Feedback da última sala cadastrada */}
+                      {manualSuccessSala && (
+                        <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 flex items-center gap-3">
+                          <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                          <p className="text-emerald-300 text-sm">
+                            Aluno associado à sala{" "}
+                            <span className="font-bold">
+                              {manualSuccessSala}
+                            </span>
+                            . Você pode cadastrar outro abaixo.
                           </p>
-                        )}
-                      </div>
-
-                      {/* Ano + Turma */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>
-                            Ano <span className="text-red-500">*</span>
-                          </Label>
-                          <select
-                            name="ano"
-                            value={manualForm.ano}
-                            onChange={handleManualFormChange}
-                            className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
-                              manualErrors.ano
-                                ? "border-red-500 bg-red-500/10 text-red-100"
-                                : "border-zinc-800"
-                            }`}
-                          >
-                            <option value="">Selecione</option>
-                            {["1", "2", "3"].map((a) => (
-                              <option key={a} value={a}>
-                                {a}º Ano
-                              </option>
-                            ))}
-                          </select>
-                          {manualErrors.ano && (
-                            <p className="text-red-400 text-xs flex items-center gap-1">
-                              <AlertCircle className="h-3 w-3 shrink-0" />
-                              {manualErrors.ano}
-                            </p>
-                          )}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>
-                            Turma <span className="text-red-500">*</span>
-                          </Label>
-                          <select
-                            name="turma"
-                            value={manualForm.turma}
-                            onChange={handleManualFormChange}
-                            className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
-                              manualErrors.turma
-                                ? "border-red-500 bg-red-500/10 text-red-100"
-                                : "border-zinc-800"
-                            }`}
-                          >
-                            <option value="">Selecione</option>
-                            {Array.from({ length: 12 }, (_, i) =>
-                              String.fromCharCode(65 + i)
-                            ).map((t) => (
-                              <option key={t} value={t}>
-                                Turma {t}
-                              </option>
-                            ))}
-                          </select>
-                          {manualErrors.turma && (
-                            <p className="text-red-400 text-xs flex items-center gap-1">
-                              <AlertCircle className="h-3 w-3 shrink-0" />
-                              {manualErrors.turma}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* CPF */}
-                      <div className="space-y-1.5">
-                        <Label>
-                          CPF <span className="text-red-500">*</span>
-                        </Label>
-                        <Input
-                          name="cpf"
-                          value={manualForm.cpf}
-                          onChange={handleManualFormChange}
-                          placeholder="000.000.000-00"
-                          inputMode="numeric"
-                          error={!!manualErrors.cpf}
-                        />
-                        {manualErrors.cpf && (
-                          <p className="text-red-400 text-xs flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3 shrink-0" />
-                            {manualErrors.cpf}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Divisor opcional */}
-                      <div className="flex items-center gap-3 py-1">
-                        <div className="flex-1 h-px bg-zinc-800" />
-                        <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
-                          Opcional
-                        </span>
-                        <div className="flex-1 h-px bg-zinc-800" />
-                      </div>
-
-                      {/* E-mail */}
-                      <div className="space-y-1.5">
-                        <Label>E-mail</Label>
-                        <Input
-                          name="email"
-                          value={manualForm.email}
-                          onChange={handleManualFormChange}
-                          placeholder="aluno@email.com"
-                          type="email"
-                          error={!!manualErrors.email}
-                        />
-                        {manualErrors.email && (
-                          <p className="text-red-400 text-xs flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3 shrink-0" />
-                            {manualErrors.email}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Telefone */}
-                      <div className="space-y-1.5">
-                        <Label>Telefone</Label>
-                        <Input
-                          name="telefone"
-                          value={manualForm.telefone}
-                          onChange={handleManualFormChange}
-                          placeholder="(31) 99999-9999"
-                          inputMode="numeric"
-                          error={!!manualErrors.telefone}
-                        />
-                        {manualErrors.telefone && (
-                          <p className="text-red-400 text-xs flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3 shrink-0" />
-                            {manualErrors.telefone}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Botão salvar */}
-                    <div className="px-5 pb-5">
-                      <Button
-                        className="w-full h-14"
-                        onClick={handleManualCadastro}
-                        isLoading={manualLoading}
-                        disabled={manualLoading}
-                      >
-                        <UserPlus className="h-5 w-5" />
-                        {manualLoading ? "Salvando..." : "Cadastrar Aluno"}
-                      </Button>
-                    </div>
-                  </div>
-                    </>
-                  )}
-
-                  {/* ── FORM: PAI / RESPONSÁVEL ── */}
-                  {manualType === "pai" && (
-                    <>
-                      {/* Feedback de sucesso */}
-                      {parentSuccess && (
-                        <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 space-y-2">
-                          <div className="flex items-center gap-3">
-                            <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
-                            <p className="text-emerald-300 text-sm font-semibold">
-                              Responsável cadastrado com sucesso!
-                            </p>
-                          </div>
-                          {parentSuccess.alunoNome && (
-                            <div className="ml-8 bg-emerald-950/80 border border-emerald-800/40 rounded-xl px-4 py-3 space-y-1">
-                              <p className="text-emerald-200 text-xs font-bold uppercase tracking-widest">Associado a</p>
-                              <p className="text-white font-semibold text-sm">{parentSuccess.alunoNome}</p>
-                              <p className="text-emerald-400 text-xs">
-                                Turma {parentSuccess.alunoTurma} · CPF {formatCpf(parentSuccess.cpf)}
-                              </p>
-                            </div>
-                          )}
-                          <button
-                            onClick={() => {
-                              setParentSuccess(null);
-                            }}
-                            className="ml-8 text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
-                          >
-                            Cadastrar outro responsável
-                          </button>
                         </div>
                       )}
 
-                      {!parentSuccess && (
                       <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
-                        {/* Preview de associação */}
-                        {parentAssociatedStudent && (
-                          <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <GraduationCap className="h-4 w-4 text-zinc-400 shrink-0" />
-                              <span className="text-zinc-400 text-sm truncate">
-                                Pai de{" "}
-                                <span className="text-white font-bold">
-                                  {parentAssociatedStudent.nome}
-                                </span>
-                                {" · "}
-                                <span className="text-zinc-400">
-                                  Turma {parentAssociatedStudent.turmaId}
-                                </span>
-                                {parentAssociatedStudent.cpf && (
-                                  <span className="text-zinc-500">
-                                    {" · "}CPF {formatCpf(parentAssociatedStudent.cpf)}
-                                  </span>
-                                )}
+                        {/* Preview da sala */}
+                        {manualForm.ano && manualForm.turma && (
+                          <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center gap-2">
+                            <MdGroups className="h-4 w-4 text-zinc-400" />
+                            <span className="text-zinc-400 text-sm">
+                              Será associado à sala{" "}
+                              <span className="text-white font-bold">
+                                {manualForm.ano}
+                                {manualForm.turma}
                               </span>
-                            </div>
-                            <button
-                              onClick={() => {
-                                setParentAssociatedStudent(null);
-                                setParentStudentSearch("");
-                                setParentStudentResults([]);
-                              }}
-                              className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
+                            </span>
                           </div>
                         )}
 
@@ -5218,36 +5331,84 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           {/* Nome */}
                           <div className="space-y-1.5">
                             <Label>
-                              Nome do Responsável <span className="text-red-500">*</span>
+                              Nome do Aluno{" "}
+                              <span className="text-red-500">*</span>
                             </Label>
                             <Input
-                              name="nome"
-                              value={parentForm.nome}
-                              onChange={handleParentFormChange}
-                              placeholder="Nome completo do pai/responsável"
-                              error={!!parentErrors.nome}
+                              name="nomeAluno"
+                              value={manualForm.nomeAluno}
+                              onChange={handleManualFormChange}
+                              placeholder="Nome completo do aluno"
+                              error={!!manualErrors.nomeAluno}
                             />
-                            {parentErrors.nome && (
+                            {manualErrors.nomeAluno && (
                               <p className="text-red-400 text-xs flex items-center gap-1">
                                 <AlertCircle className="h-3 w-3 shrink-0" />
-                                {parentErrors.nome}
+                                {manualErrors.nomeAluno}
                               </p>
                             )}
                           </div>
 
-                          {/* Relação */}
-                          <div className="space-y-1.5">
-                            <Label>Relação <span className="text-red-500">*</span></Label>
-                            <select
-                              name="relacao"
-                              value={parentForm.relacao}
-                              onChange={handleParentFormChange}
-                              className="flex h-12 w-full rounded-xl border border-zinc-800 px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none"
-                            >
-                              <option value="pai">Pai</option>
-                              <option value="mae">Mãe</option>
-                              <option value="responsavel">Responsável</option>
-                            </select>
+                          {/* Ano + Turma */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <Label>
+                                Ano <span className="text-red-500">*</span>
+                              </Label>
+                              <select
+                                name="ano"
+                                value={manualForm.ano}
+                                onChange={handleManualFormChange}
+                                className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
+                                  manualErrors.ano
+                                    ? "border-red-500 bg-red-500/10 text-red-100"
+                                    : "border-zinc-800"
+                                }`}
+                              >
+                                <option value="">Selecione</option>
+                                {["1", "2", "3"].map((a) => (
+                                  <option key={a} value={a}>
+                                    {a}º Ano
+                                  </option>
+                                ))}
+                              </select>
+                              {manualErrors.ano && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {manualErrors.ano}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label>
+                                Turma <span className="text-red-500">*</span>
+                              </Label>
+                              <select
+                                name="turma"
+                                value={manualForm.turma}
+                                onChange={handleManualFormChange}
+                                className={`flex h-12 w-full rounded-xl border px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none ${
+                                  manualErrors.turma
+                                    ? "border-red-500 bg-red-500/10 text-red-100"
+                                    : "border-zinc-800"
+                                }`}
+                              >
+                                <option value="">Selecione</option>
+                                {Array.from({ length: 12 }, (_, i) =>
+                                  String.fromCharCode(65 + i)
+                                ).map((t) => (
+                                  <option key={t} value={t}>
+                                    Turma {t}
+                                  </option>
+                                ))}
+                              </select>
+                              {manualErrors.turma && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {manualErrors.turma}
+                                </p>
+                              )}
+                            </div>
                           </div>
 
                           {/* CPF */}
@@ -5257,94 +5418,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             </Label>
                             <Input
                               name="cpf"
-                              value={parentForm.cpf}
-                              onChange={handleParentFormChange}
+                              value={manualForm.cpf}
+                              onChange={handleManualFormChange}
                               placeholder="000.000.000-00"
                               inputMode="numeric"
-                              error={!!parentErrors.cpf}
+                              error={!!manualErrors.cpf}
                             />
-                            {parentErrors.cpf && (
+                            {manualErrors.cpf && (
                               <p className="text-red-400 text-xs flex items-center gap-1">
                                 <AlertCircle className="h-3 w-3 shrink-0" />
-                                {parentErrors.cpf}
+                                {manualErrors.cpf}
                               </p>
-                            )}
-                          </div>
-
-                          {/* Associar a aluno */}
-                          <div className="space-y-1.5">
-                            <Label>Associar a Aluno</Label>
-                            {!parentAssociatedStudent ? (
-                              <div className="relative" ref={parentStudentSearchRef}>
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
-                                <input
-                                  type="text"
-                                  placeholder="Pesquisar aluno pelo nome..."
-                                  value={parentStudentSearch}
-                                  onChange={(e) => {
-                                    setParentStudentSearch(e.target.value);
-                                    setParentStudentSearchOpen(true);
-                                    searchStudentsForParent(e.target.value);
-                                  }}
-                                  onFocus={() => setParentStudentSearchOpen(true)}
-                                  className="w-full h-12 pl-11 pr-4 rounded-xl bg-black border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
-                                />
-                                {parentStudentSearchLoading && (
-                                  <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
-                                )}
-                                {/* Dropdown de resultados */}
-                                {parentStudentSearchOpen && parentStudentSearch.length >= 2 && !parentStudentSearchLoading && (
-                                  <div className="absolute z-50 w-full mt-1 bg-[#111] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
-                                    {parentStudentResults.length === 0 ? (
-                                      <div className="py-8 text-center text-zinc-600 text-sm">
-                                        Nenhum aluno encontrado
-                                      </div>
-                                    ) : (
-                                      parentStudentResults.map((aluno, i) => (
-                                        <button
-                                          key={i}
-                                          onClick={() => {
-                                            setParentAssociatedStudent(aluno);
-                                            setParentStudentSearch("");
-                                            setParentStudentResults([]);
-                                            setParentStudentSearchOpen(false);
-                                          }}
-                                          className="w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors border-b border-zinc-800/50 last:border-0 flex items-center justify-between gap-3"
-                                        >
-                                          <div className="min-w-0">
-                                            <p className="text-white text-sm font-medium truncate">
-                                              {aluno.nome}
-                                            </p>
-                                            <p className="text-zinc-500 text-xs mt-0.5">
-                                              Turma {aluno.turmaId}
-                                              {aluno.cpf && ` · CPF ${formatCpf(aluno.cpf)}`}
-                                            </p>
-                                          </div>
-                                          <GraduationCap className="h-4 w-4 text-zinc-600 shrink-0" />
-                                        </button>
-                                      ))
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="h-12 rounded-xl border border-emerald-800/60 bg-emerald-950/30 px-4 flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <GraduationCap className="h-4 w-4 text-emerald-400 shrink-0" />
-                                  <span className="text-emerald-300 text-sm font-medium truncate">
-                                    {parentAssociatedStudent.nome} — Turma {parentAssociatedStudent.turmaId}
-                                  </span>
-                                </div>
-                                <button
-                                  onClick={() => {
-                                    setParentAssociatedStudent(null);
-                                    setParentStudentSearch("");
-                                  }}
-                                  className="shrink-0 text-zinc-500 hover:text-white transition-colors"
-                                >
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </div>
                             )}
                           </div>
 
@@ -5362,16 +5446,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             <Label>E-mail</Label>
                             <Input
                               name="email"
-                              value={parentForm.email}
-                              onChange={handleParentFormChange}
-                              placeholder="responsavel@email.com"
+                              value={manualForm.email}
+                              onChange={handleManualFormChange}
+                              placeholder="aluno@email.com"
                               type="email"
-                              error={!!parentErrors.email}
+                              error={!!manualErrors.email}
                             />
-                            {parentErrors.email && (
+                            {manualErrors.email && (
                               <p className="text-red-400 text-xs flex items-center gap-1">
                                 <AlertCircle className="h-3 w-3 shrink-0" />
-                                {parentErrors.email}
+                                {manualErrors.email}
                               </p>
                             )}
                           </div>
@@ -5381,16 +5465,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             <Label>Telefone</Label>
                             <Input
                               name="telefone"
-                              value={parentForm.telefone}
-                              onChange={handleParentFormChange}
+                              value={manualForm.telefone}
+                              onChange={handleManualFormChange}
                               placeholder="(31) 99999-9999"
                               inputMode="numeric"
-                              error={!!parentErrors.telefone}
+                              error={!!manualErrors.telefone}
                             />
-                            {parentErrors.telefone && (
+                            {manualErrors.telefone && (
                               <p className="text-red-400 text-xs flex items-center gap-1">
                                 <AlertCircle className="h-3 w-3 shrink-0" />
-                                {parentErrors.telefone}
+                                {manualErrors.telefone}
                               </p>
                             )}
                           </div>
@@ -5400,15 +5484,309 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         <div className="px-5 pb-5">
                           <Button
                             className="w-full h-14"
-                            onClick={handleParentCadastro}
-                            isLoading={parentLoading}
-                            disabled={parentLoading}
+                            onClick={handleManualCadastro}
+                            isLoading={manualLoading}
+                            disabled={manualLoading}
                           >
-                            <User className="h-5 w-5" />
-                            {parentLoading ? "Salvando..." : "Cadastrar Responsável"}
+                            <UserPlus className="h-5 w-5" />
+                            {manualLoading ? "Salvando..." : "Cadastrar Aluno"}
                           </Button>
                         </div>
                       </div>
+                    </>
+                  )}
+
+                  {/* ── FORM: PAI / RESPONSÁVEL ── */}
+                  {manualType === "pai" && (
+                    <>
+                      {/* Feedback de sucesso */}
+                      {parentSuccess && (
+                        <div className="bg-emerald-950/60 border border-emerald-800/60 rounded-2xl px-5 py-4 space-y-2">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                            <p className="text-emerald-300 text-sm font-semibold">
+                              Responsável cadastrado com sucesso!
+                            </p>
+                          </div>
+                          {parentSuccess.alunoNome && (
+                            <div className="ml-8 bg-emerald-950/80 border border-emerald-800/40 rounded-xl px-4 py-3 space-y-1">
+                              <p className="text-emerald-200 text-xs font-bold uppercase tracking-widest">
+                                Associado a
+                              </p>
+                              <p className="text-white font-semibold text-sm">
+                                {parentSuccess.alunoNome}
+                              </p>
+                              <p className="text-emerald-400 text-xs">
+                                Turma {parentSuccess.alunoTurma} · CPF{" "}
+                                {formatCpf(parentSuccess.cpf)}
+                              </p>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              setParentSuccess(null);
+                            }}
+                            className="ml-8 text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                          >
+                            Cadastrar outro responsável
+                          </button>
+                        </div>
+                      )}
+
+                      {!parentSuccess && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                          {/* Preview de associação */}
+                          {parentAssociatedStudent && (
+                            <div className="bg-white/5 border-b border-zinc-800 px-5 py-3 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <GraduationCap className="h-4 w-4 text-zinc-400 shrink-0" />
+                                <span className="text-zinc-400 text-sm truncate">
+                                  Pai de{" "}
+                                  <span className="text-white font-bold">
+                                    {parentAssociatedStudent.nome}
+                                  </span>
+                                  {" · "}
+                                  <span className="text-zinc-400">
+                                    Turma {parentAssociatedStudent.turmaId}
+                                  </span>
+                                  {parentAssociatedStudent.cpf && (
+                                    <span className="text-zinc-500">
+                                      {" · "}CPF{" "}
+                                      {formatCpf(parentAssociatedStudent.cpf)}
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setParentAssociatedStudent(null);
+                                  setParentStudentSearch("");
+                                  setParentStudentResults([]);
+                                }}
+                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="p-5 space-y-4">
+                            {/* Nome */}
+                            <div className="space-y-1.5">
+                              <Label>
+                                Nome do Responsável{" "}
+                                <span className="text-red-500">*</span>
+                              </Label>
+                              <Input
+                                name="nome"
+                                value={parentForm.nome}
+                                onChange={handleParentFormChange}
+                                placeholder="Nome completo do pai/responsável"
+                                error={!!parentErrors.nome}
+                              />
+                              {parentErrors.nome && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {parentErrors.nome}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Relação */}
+                            <div className="space-y-1.5">
+                              <Label>
+                                Relação <span className="text-red-500">*</span>
+                              </Label>
+                              <select
+                                name="relacao"
+                                value={parentForm.relacao}
+                                onChange={handleParentFormChange}
+                                className="flex h-12 w-full rounded-xl border border-zinc-800 px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none"
+                              >
+                                <option value="pai">Pai</option>
+                                <option value="mae">Mãe</option>
+                                <option value="responsavel">Responsável</option>
+                              </select>
+                            </div>
+
+                            {/* CPF */}
+                            <div className="space-y-1.5">
+                              <Label>
+                                CPF <span className="text-red-500">*</span>
+                              </Label>
+                              <Input
+                                name="cpf"
+                                value={parentForm.cpf}
+                                onChange={handleParentFormChange}
+                                placeholder="000.000.000-00"
+                                inputMode="numeric"
+                                error={!!parentErrors.cpf}
+                              />
+                              {parentErrors.cpf && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {parentErrors.cpf}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Associar a aluno */}
+                            <div className="space-y-1.5">
+                              <Label>Associar a Aluno</Label>
+                              {!parentAssociatedStudent ? (
+                                <div
+                                  className="relative"
+                                  ref={parentStudentSearchRef}
+                                >
+                                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                                  <input
+                                    type="text"
+                                    placeholder="Pesquisar aluno pelo nome..."
+                                    value={parentStudentSearch}
+                                    onChange={(e) => {
+                                      setParentStudentSearch(e.target.value);
+                                      setParentStudentSearchOpen(true);
+                                      searchStudentsForParent(e.target.value);
+                                    }}
+                                    onFocus={() =>
+                                      setParentStudentSearchOpen(true)
+                                    }
+                                    className="w-full h-12 pl-11 pr-4 rounded-xl bg-black border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                                  />
+                                  {parentStudentSearchLoading && (
+                                    <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                                  )}
+                                  {/* Dropdown de resultados */}
+                                  {parentStudentSearchOpen &&
+                                    parentStudentSearch.length >= 2 &&
+                                    !parentStudentSearchLoading && (
+                                      <div className="absolute z-50 w-full mt-1 bg-[#111] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+                                        {parentStudentResults.length === 0 ? (
+                                          <div className="py-8 text-center text-zinc-600 text-sm">
+                                            Nenhum aluno encontrado
+                                          </div>
+                                        ) : (
+                                          parentStudentResults.map(
+                                            (aluno, i) => (
+                                              <button
+                                                key={i}
+                                                onClick={() => {
+                                                  setParentAssociatedStudent(
+                                                    aluno
+                                                  );
+                                                  setParentStudentSearch("");
+                                                  setParentStudentResults([]);
+                                                  setParentStudentSearchOpen(
+                                                    false
+                                                  );
+                                                }}
+                                                className="w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors border-b border-zinc-800/50 last:border-0 flex items-center justify-between gap-3"
+                                              >
+                                                <div className="min-w-0">
+                                                  <p className="text-white text-sm font-medium truncate">
+                                                    {aluno.nome}
+                                                  </p>
+                                                  <p className="text-zinc-500 text-xs mt-0.5">
+                                                    Turma {aluno.turmaId}
+                                                    {aluno.cpf &&
+                                                      ` · CPF ${formatCpf(
+                                                        aluno.cpf
+                                                      )}`}
+                                                  </p>
+                                                </div>
+                                                <GraduationCap className="h-4 w-4 text-zinc-600 shrink-0" />
+                                              </button>
+                                            )
+                                          )
+                                        )}
+                                      </div>
+                                    )}
+                                </div>
+                              ) : (
+                                <div className="h-12 rounded-xl border border-emerald-800/60 bg-emerald-950/30 px-4 flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <GraduationCap className="h-4 w-4 text-emerald-400 shrink-0" />
+                                    <span className="text-emerald-300 text-sm font-medium truncate">
+                                      {parentAssociatedStudent.nome} — Turma{" "}
+                                      {parentAssociatedStudent.turmaId}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setParentAssociatedStudent(null);
+                                      setParentStudentSearch("");
+                                    }}
+                                    className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Divisor opcional */}
+                            <div className="flex items-center gap-3 py-1">
+                              <div className="flex-1 h-px bg-zinc-800" />
+                              <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
+                                Opcional
+                              </span>
+                              <div className="flex-1 h-px bg-zinc-800" />
+                            </div>
+
+                            {/* E-mail */}
+                            <div className="space-y-1.5">
+                              <Label>E-mail</Label>
+                              <Input
+                                name="email"
+                                value={parentForm.email}
+                                onChange={handleParentFormChange}
+                                placeholder="responsavel@email.com"
+                                type="email"
+                                error={!!parentErrors.email}
+                              />
+                              {parentErrors.email && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {parentErrors.email}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Telefone */}
+                            <div className="space-y-1.5">
+                              <Label>Telefone</Label>
+                              <Input
+                                name="telefone"
+                                value={parentForm.telefone}
+                                onChange={handleParentFormChange}
+                                placeholder="(31) 99999-9999"
+                                inputMode="numeric"
+                                error={!!parentErrors.telefone}
+                              />
+                              {parentErrors.telefone && (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  {parentErrors.telefone}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Botão salvar */}
+                          <div className="px-5 pb-5">
+                            <Button
+                              className="w-full h-14"
+                              onClick={handleParentCadastro}
+                              isLoading={parentLoading}
+                              disabled={parentLoading}
+                            >
+                              <User className="h-5 w-5" />
+                              {parentLoading
+                                ? "Salvando..."
+                                : "Cadastrar Responsável"}
+                            </Button>
+                          </div>
+                        </div>
                       )}
                     </>
                   )}
@@ -5504,7 +5882,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 </div>
               )}
 
-
               {/* ── SUB-ABA: RESPONSÁVEIS ── */}
               {groupsSubTab === "responsaveis" && (
                 <div className="space-y-5">
@@ -5519,7 +5896,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           ? "Carregando..."
                           : allResponsaveis.length === 0
                           ? "Nenhum responsável cadastrado."
-                          : `${allResponsaveis.length} responsável${allResponsaveis.length !== 1 ? "is" : ""} cadastrado${allResponsaveis.length !== 1 ? "s" : ""}.`}
+                          : `${allResponsaveis.length} responsável${
+                              allResponsaveis.length !== 1 ? "is" : ""
+                            } cadastrado${
+                              allResponsaveis.length !== 1 ? "s" : ""
+                            }.`}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -5528,7 +5909,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         disabled={allResponsaveisLoading}
                         className="h-9 px-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 text-xs font-semibold hover:text-white hover:border-zinc-600 transition-all flex items-center gap-1.5 disabled:opacity-50"
                       >
-                        {allResponsaveisLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                        {allResponsaveisLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Search className="h-3.5 w-3.5" />
+                        )}
                         Atualizar
                       </button>
                       {allResponsaveis.length > 0 && (
@@ -5558,7 +5943,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     />
                     {responsavelSearch.length > 0 && (
                       <button
-                        onClick={() => { setResponsavelSearch(""); setResponsavelResults([]); }}
+                        onClick={() => {
+                          setResponsavelSearch("");
+                          setResponsavelResults([]);
+                        }}
                         className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-zinc-600 hover:text-white transition-colors"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -5572,25 +5960,31 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   {/* Lista: resultados de busca OU todos */}
                   {(() => {
                     const isFiltering = responsavelSearch.length >= 2;
-                    const list = isFiltering ? responsavelResults : allResponsaveis;
-                    const loading = isFiltering ? responsavelSearchLoading : allResponsaveisLoading;
+                    const list = isFiltering
+                      ? responsavelResults
+                      : allResponsaveis;
+                    const loading = isFiltering
+                      ? responsavelSearchLoading
+                      : allResponsaveisLoading;
 
-                    if (loading) return (
-                      <div className="py-16 flex justify-center">
-                        <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
-                      </div>
-                    );
+                    if (loading)
+                      return (
+                        <div className="py-16 flex justify-center">
+                          <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                        </div>
+                      );
 
-                    if (list.length === 0) return (
-                      <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
-                        <User className="h-8 w-8 opacity-20" />
-                        <p className="text-sm">
-                          {isFiltering
-                            ? `Nenhum responsável encontrado para "${responsavelSearch}".`
-                            : "Nenhum responsável cadastrado ainda."}
-                        </p>
-                      </div>
-                    );
+                    if (list.length === 0)
+                      return (
+                        <div className="py-16 text-center text-zinc-600 flex flex-col items-center gap-3">
+                          <User className="h-8 w-8 opacity-20" />
+                          <p className="text-sm">
+                            {isFiltering
+                              ? `Nenhum responsável encontrado para "${responsavelSearch}".`
+                              : "Nenhum responsável cadastrado ainda."}
+                          </p>
+                        </div>
+                      );
 
                     return (
                       <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
@@ -5598,15 +5992,24 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
                             {isFiltering ? "Resultados" : "Todos"}
                           </p>
-                          <span className="text-xs text-zinc-600">{list.length}</span>
+                          <span className="text-xs text-zinc-600">
+                            {list.length}
+                          </span>
                         </div>
                         <div className="divide-y divide-zinc-800/50 max-h-[60vh] overflow-y-auto">
                           {list.map((resp, i) => {
-                            const cpfDigits = (resp.cpf || "").replace(/\D/g, "");
+                            const cpfDigits = (resp.cpf || "").replace(
+                              /\D/g,
+                              ""
+                            );
                             const hasTicket = allTickets.some(
                               (t) =>
-                                (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
-                                (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+                                (t.cpf || "").replace(/\D/g, "") ===
+                                  cpfDigits ||
+                                (usersMap[t.userId] || "").replace(
+                                  /\D/g,
+                                  ""
+                                ) === cpfDigits
                             );
                             return (
                               <button
@@ -6081,30 +6484,44 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       </p>
                       <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
                         {studentModalResponsaveis.map((resp) => (
-                          <div key={resp.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                          <div
+                            key={resp.id}
+                            className="px-4 py-3 flex items-center justify-between gap-3"
+                          >
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
-                                <p className="text-white text-sm font-semibold truncate">{resp.nome}</p>
+                                <p className="text-white text-sm font-semibold truncate">
+                                  {resp.nome}
+                                </p>
                                 <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-[10px] font-bold text-zinc-400 capitalize">
                                   {resp.relacao || "responsável"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-3 mt-0.5">
-                                <span className="text-zinc-500 text-xs font-mono">{formatCpf(resp.cpf)}</span>
+                                <span className="text-zinc-500 text-xs font-mono">
+                                  {formatCpf(resp.cpf)}
+                                </span>
                                 {resp.telefone && (
-                                  <span className="text-zinc-600 text-xs">{resp.telefone}</span>
+                                  <span className="text-zinc-600 text-xs">
+                                    {resp.telefone}
+                                  </span>
                                 )}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               {(() => {
-                                const cpfR = (resp.cpf || "").replace(/\D/g, "");
+                                const cpfR = (resp.cpf || "").replace(
+                                  /\D/g,
+                                  ""
+                                );
                                 const ticket = allTickets.find(
-                                  (t) => (t.cpf || "").replace(/\D/g, "") === cpfR
+                                  (t) =>
+                                    (t.cpf || "").replace(/\D/g, "") === cpfR
                                 );
                                 return ticket ? (
                                   <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-[10px] font-bold text-green-400 uppercase tracking-wider">
-                                    <LuTicketCheck className="h-3 w-3" /> ingresso
+                                    <LuTicketCheck className="h-3 w-3" />{" "}
+                                    ingresso
                                   </span>
                                 ) : (
                                   <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
@@ -6397,7 +6814,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         </div>
       )}
 
-
       {/* ── MODAL DO RESPONSÁVEL ── */}
       {responsavelModal && (
         <div
@@ -6420,7 +6836,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   </p>
                   <p className="text-zinc-500 text-xs mt-0.5 capitalize">
                     {responsavelModal.relacao || "Responsável"}
-                    {responsavelModal.alunoNome && ` · Pai de ${responsavelModal.alunoNome}`}
+                    {responsavelModal.alunoNome &&
+                      ` · Pai de ${responsavelModal.alunoNome}`}
                   </p>
                 </div>
               </div>
@@ -6476,12 +6893,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <Input
                             value={editResponsavelForm.nome}
                             onChange={(e) =>
-                              setEditResponsavelForm((p) => ({ ...p, nome: e.target.value }))
+                              setEditResponsavelForm((p) => ({
+                                ...p,
+                                nome: e.target.value,
+                              }))
                             }
                             error={editResponsavelErrors.nome}
                           />
                           {editResponsavelErrors.nome && (
-                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.nome}</p>
+                            <p className="text-red-400 text-[11px] mt-1">
+                              {editResponsavelErrors.nome}
+                            </p>
                           )}
                         </div>
                         <div>
@@ -6491,12 +6913,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             placeholder="email@exemplo.com"
                             value={editResponsavelForm.email}
                             onChange={(e) =>
-                              setEditResponsavelForm((p) => ({ ...p, email: e.target.value }))
+                              setEditResponsavelForm((p) => ({
+                                ...p,
+                                email: e.target.value,
+                              }))
                             }
                             error={editResponsavelErrors.email}
                           />
                           {editResponsavelErrors.email && (
-                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.email}</p>
+                            <p className="text-red-400 text-[11px] mt-1">
+                              {editResponsavelErrors.email}
+                            </p>
                           )}
                         </div>
                         <div>
@@ -6513,7 +6940,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             error={editResponsavelErrors.telefone}
                           />
                           {editResponsavelErrors.telefone && (
-                            <p className="text-red-400 text-[11px] mt-1">{editResponsavelErrors.telefone}</p>
+                            <p className="text-red-400 text-[11px] mt-1">
+                              {editResponsavelErrors.telefone}
+                            </p>
                           )}
                         </div>
                         <div>
@@ -6521,7 +6950,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <select
                             value={editResponsavelForm.relacao}
                             onChange={(e) =>
-                              setEditResponsavelForm((p) => ({ ...p, relacao: e.target.value }))
+                              setEditResponsavelForm((p) => ({
+                                ...p,
+                                relacao: e.target.value,
+                              }))
                             }
                             className="flex h-12 w-full rounded-xl border border-zinc-800 px-4 py-2 text-sm bg-black text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition-all appearance-none"
                           >
@@ -6556,15 +6988,48 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     ) : (
                       <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
                         {[
-                          { label: "CPF", value: formatCpf(responsavelModal.cpf) },
-                          { label: "E-mail", value: responsavelModal.email || null },
-                          { label: "Telefone", value: responsavelModal.telefone || null },
-                          { label: "Relação", value: responsavelModal.relacao ? responsavelModal.relacao.charAt(0).toUpperCase() + responsavelModal.relacao.slice(1) : null },
-                          { label: "Cadastrado em", value: responsavelModal.criadoEm ? new Date(responsavelModal.criadoEm).toLocaleDateString("pt-BR") : null },
+                          {
+                            label: "CPF",
+                            value: formatCpf(responsavelModal.cpf),
+                          },
+                          {
+                            label: "E-mail",
+                            value: responsavelModal.email || null,
+                          },
+                          {
+                            label: "Telefone",
+                            value: responsavelModal.telefone || null,
+                          },
+                          {
+                            label: "Relação",
+                            value: responsavelModal.relacao
+                              ? responsavelModal.relacao
+                                  .charAt(0)
+                                  .toUpperCase() +
+                                responsavelModal.relacao.slice(1)
+                              : null,
+                          },
+                          {
+                            label: "Cadastrado em",
+                            value: responsavelModal.criadoEm
+                              ? new Date(
+                                  responsavelModal.criadoEm
+                                ).toLocaleDateString("pt-BR")
+                              : null,
+                          },
                         ].map(({ label, value }) => (
-                          <div key={label} className="flex items-center justify-between px-4 py-3">
-                            <span className="text-zinc-500 text-xs font-semibold">{label}</span>
-                            <span className={`text-xs font-mono ${value ? "text-white" : "text-zinc-700 italic"}`}>
+                          <div
+                            key={label}
+                            className="flex items-center justify-between px-4 py-3"
+                          >
+                            <span className="text-zinc-500 text-xs font-semibold">
+                              {label}
+                            </span>
+                            <span
+                              className={`text-xs font-mono ${
+                                value ? "text-white" : "text-zinc-700 italic"
+                              }`}
+                            >
                               {value || "não informado"}
                             </span>
                           </div>
@@ -6582,7 +7047,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             <Input
                               placeholder="Digite o nome do aluno..."
                               value={editAlunoSearch}
-                              onChange={(e) => handleEditAlunoSearch(e.target.value)}
+                              onChange={(e) =>
+                                handleEditAlunoSearch(e.target.value)
+                              }
                               autoFocus
                             />
                             {editAlunoLoading && (
@@ -6594,13 +7061,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               {editAlunoResults.map((aluno) => (
                                 <button
                                   key={aluno.id + aluno.turmaId}
-                                  onClick={() => handleSaveAlunoAssociado(aluno)}
+                                  onClick={() =>
+                                    handleSaveAlunoAssociado(aluno)
+                                  }
                                   disabled={savingAlunoAssociado}
                                   className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-900 transition-colors disabled:opacity-50"
                                 >
                                   <GraduationCap className="h-4 w-4 text-zinc-500 shrink-0" />
                                   <div className="min-w-0">
-                                    <p className="text-white text-sm font-semibold truncate">{aluno.nome}</p>
+                                    <p className="text-white text-sm font-semibold truncate">
+                                      {aluno.nome}
+                                    </p>
                                     <p className="text-zinc-500 text-xs">
                                       Turma {aluno.turmaId} · {aluno.ano}º Ano
                                     </p>
@@ -6612,11 +7083,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               ))}
                             </div>
                           )}
-                          {editAlunoSearch.trim().length >= 2 && !editAlunoLoading && editAlunoResults.length === 0 && (
-                            <p className="text-zinc-600 text-xs text-center py-2">
-                              Nenhum aluno encontrado.
-                            </p>
-                          )}
+                          {editAlunoSearch.trim().length >= 2 &&
+                            !editAlunoLoading &&
+                            editAlunoResults.length === 0 && (
+                              <p className="text-zinc-600 text-xs text-center py-2">
+                                Nenhum aluno encontrado.
+                              </p>
+                            )}
                           <div className="flex gap-2 pt-1">
                             <button
                               onClick={() => {
@@ -6655,12 +7128,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           {responsavelModal.alunoNome ? (
                             <>
                               Associado a{" "}
-                              <span className="text-white font-bold">{responsavelModal.alunoNome}</span>
+                              <span className="text-white font-bold">
+                                {responsavelModal.alunoNome}
+                              </span>
                               {" · "}Turma {responsavelModal.alunoTurma}
-                              {responsavelModal.alunoAno && ` · ${responsavelModal.alunoAno}º Ano`}
+                              {responsavelModal.alunoAno &&
+                                ` · ${responsavelModal.alunoAno}º Ano`}
                             </>
                           ) : (
-                            <span className="text-zinc-600 italic">Sem aluno associado</span>
+                            <span className="text-zinc-600 italic">
+                              Sem aluno associado
+                            </span>
                           )}
                           <Pencil className="h-3 w-3 text-zinc-600 group-hover:text-zinc-400 ml-auto shrink-0 transition-colors" />
                         </div>
@@ -6677,33 +7155,90 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     {responsavelModalTicket ? (
                       /* Ingresso existente */
                       <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
-                        <div className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${responsavelModalTicket.usado ? "bg-green-500/5" : "bg-zinc-900/30"}`}>
+                        <div
+                          className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${
+                            responsavelModalTicket.usado
+                              ? "bg-green-500/5"
+                              : "bg-zinc-900/30"
+                          }`}
+                        >
                           {responsavelModalTicket.usado ? (
                             <>
                               <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />
-                              <span className="text-green-400 text-xs font-bold">Validado — entrada confirmada</span>
+                              <span className="text-green-400 text-xs font-bold">
+                                Validado — entrada confirmada
+                              </span>
                             </>
                           ) : (
                             <>
                               <Clock className="h-4 w-4 text-zinc-400 shrink-0" />
-                              <span className="text-zinc-400 text-xs font-bold">Pendente de validação</span>
+                              <span className="text-zinc-400 text-xs font-bold">
+                                Pendente de validação
+                              </span>
                             </>
                           )}
                         </div>
                         <div className="divide-y divide-zinc-800/60">
                           {[
-                            { label: "Código", value: responsavelModalTicket.code },
-                            { label: "Lote", value: responsavelModalTicket.type },
-                            { label: "Valor", value: responsavelModalTicket.price != null ? `R$ ${Number(responsavelModalTicket.price).toFixed(2).replace(".", ",")}` : null },
-                            { label: "Pagamento", value: responsavelModalTicket.pagamentoConfirmado ? `Confirmado${responsavelModalTicket.metodoPagamento ? " · " + responsavelModalTicket.metodoPagamento : ""}` : "Pendente" },
-                            { label: "Emitido em", value: responsavelModalTicket.criadoEm ? formatDate(responsavelModalTicket.criadoEm) : null },
-                            { label: "Entrada em", value: responsavelModalTicket.usado && responsavelModalTicket.horaEntrada ? formatDate(responsavelModalTicket.horaEntrada) : null },
-                          ].filter(({ value }) => value).map(({ label, value }) => (
-                            <div key={label} className="flex items-center justify-between px-4 py-2.5">
-                              <span className="text-zinc-500 text-xs font-semibold">{label}</span>
-                              <span className="text-white text-xs font-mono">{value}</span>
-                            </div>
-                          ))}
+                            {
+                              label: "Código",
+                              value: responsavelModalTicket.code,
+                            },
+                            {
+                              label: "Lote",
+                              value: responsavelModalTicket.type,
+                            },
+                            {
+                              label: "Valor",
+                              value:
+                                responsavelModalTicket.price != null
+                                  ? `R$ ${Number(responsavelModalTicket.price)
+                                      .toFixed(2)
+                                      .replace(".", ",")}`
+                                  : null,
+                            },
+                            {
+                              label: "Pagamento",
+                              value: responsavelModalTicket.pagamentoConfirmado
+                                ? `Confirmado${
+                                    responsavelModalTicket.metodoPagamento
+                                      ? " · " +
+                                        responsavelModalTicket.metodoPagamento
+                                      : ""
+                                  }`
+                                : "Pendente",
+                            },
+                            {
+                              label: "Emitido em",
+                              value: responsavelModalTicket.criadoEm
+                                ? formatDate(responsavelModalTicket.criadoEm)
+                                : null,
+                            },
+                            {
+                              label: "Entrada em",
+                              value:
+                                responsavelModalTicket.usado &&
+                                responsavelModalTicket.horaEntrada
+                                  ? formatDate(
+                                      responsavelModalTicket.horaEntrada
+                                    )
+                                  : null,
+                            },
+                          ]
+                            .filter(({ value }) => value)
+                            .map(({ label, value }) => (
+                              <div
+                                key={label}
+                                className="flex items-center justify-between px-4 py-2.5"
+                              >
+                                <span className="text-zinc-500 text-xs font-semibold">
+                                  {label}
+                                </span>
+                                <span className="text-white text-xs font-mono">
+                                  {value}
+                                </span>
+                              </div>
+                            ))}
                         </div>
                         <div className="flex gap-2 p-4 border-t border-zinc-800">
                           <button
@@ -6716,9 +7251,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             }`}
                           >
                             {responsavelModalTicket.usado ? (
-                              <><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg> Desvalidar</>
+                              <>
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                  <path d="M3 3v5h5" />
+                                </svg>{" "}
+                                Desvalidar
+                              </>
                             ) : (
-                              <><CheckCircle className="h-3.5 w-3.5" /> Validar</>
+                              <>
+                                <CheckCircle className="h-3.5 w-3.5" /> Validar
+                              </>
                             )}
                           </button>
                           <button
@@ -6735,21 +7288,36 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       /* Sem ingresso — form para associar */
                       <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-4 space-y-4">
                         <p className="text-zinc-500 text-xs">
-                          Este responsável ainda não possui ingresso. Associe um agora:
+                          Este responsável ainda não possui ingresso. Associe um
+                          agora:
                         </p>
 
                         {/* Lote */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Lote</label>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Lote
+                          </label>
                           <select
                             value={associarResponsavelForm.loteId}
-                            onChange={(e) => setAssociarResponsavelForm((p) => ({ ...p, loteId: e.target.value }))}
+                            onChange={(e) =>
+                              setAssociarResponsavelForm((p) => ({
+                                ...p,
+                                loteId: e.target.value,
+                              }))
+                            }
                             className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
                           >
-                            <option value="" disabled>Selecione o lote</option>
+                            <option value="" disabled>
+                              Selecione o lote
+                            </option>
                             {batches.map((b) => (
-                              <option key={b.id} value={b.id} className="bg-zinc-900">
-                                {b.nome} — R$ {Number(b.preco).toFixed(2).replace(".", ",")}
+                              <option
+                                key={b.id}
+                                value={b.id}
+                                className="bg-zinc-900"
+                              >
+                                {b.nome} — R${" "}
+                                {Number(b.preco).toFixed(2).replace(".", ",")}
                               </option>
                             ))}
                           </select>
@@ -6758,12 +7326,19 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         {/* E-mail */}
                         {!responsavelModal.email && (
                           <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">E-mail (opcional)</label>
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              E-mail (opcional)
+                            </label>
                             <input
                               type="email"
                               placeholder="email@exemplo.com"
                               value={associarResponsavelForm.email}
-                              onChange={(e) => setAssociarResponsavelForm((p) => ({ ...p, email: e.target.value }))}
+                              onChange={(e) =>
+                                setAssociarResponsavelForm((p) => ({
+                                  ...p,
+                                  email: e.target.value,
+                                }))
+                              }
                               className="flex h-11 w-full rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
                             />
                           </div>
@@ -6772,12 +7347,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         {/* Status + Pagamento */}
                         <div className="grid grid-cols-2 gap-2">
                           <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Status</label>
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Status
+                            </label>
                             <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
                               {(["pendente", "validado"] as const).map((s) => (
-                                <button key={s} type="button"
-                                  onClick={() => setAssociarResponsavelForm((p) => ({ ...p, status: s }))}
-                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${associarResponsavelForm.status === s ? "bg-white text-black" : "bg-black text-zinc-500 hover:text-white"}`}
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarResponsavelForm((p) => ({
+                                      ...p,
+                                      status: s,
+                                    }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${
+                                    associarResponsavelForm.status === s
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
                                 >
                                   {s}
                                 </button>
@@ -6785,12 +7373,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             </div>
                           </div>
                           <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">Pagamento</label>
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Pagamento
+                            </label>
                             <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
                               {([false, true] as const).map((v) => (
-                                <button key={String(v)} type="button"
-                                  onClick={() => setAssociarResponsavelForm((p) => ({ ...p, pago: v }))}
-                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${associarResponsavelForm.pago === v ? "bg-white text-black" : "bg-black text-zinc-500 hover:text-white"}`}
+                                <button
+                                  key={String(v)}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarResponsavelForm((p) => ({
+                                      ...p,
+                                      pago: v,
+                                    }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${
+                                    associarResponsavelForm.pago === v
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
                                 >
                                   {v ? "Pago" : "Pendente"}
                                 </button>
@@ -6800,8 +7401,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         </div>
 
                         <button
-                          onClick={() => { fetchBatches(); handleAssociarIngressoResponsavel(); }}
-                          disabled={!associarResponsavelForm.loteId || associarResponsavelLoading}
+                          onClick={() => {
+                            fetchBatches();
+                            handleAssociarIngressoResponsavel();
+                          }}
+                          disabled={
+                            !associarResponsavelForm.loteId ||
+                            associarResponsavelLoading
+                          }
                           className="w-full h-11 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
                         >
                           {associarResponsavelLoading ? (
@@ -6825,7 +7432,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       {confirmLimparResponsaveis && (
         <div
           className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
-          onClick={() => !limparResponsaveisLoading && setConfirmLimparResponsaveis(false)}
+          onClick={() =>
+            !limparResponsaveisLoading && setConfirmLimparResponsaveis(false)
+          }
         >
           <div
             className="bg-[#0a0a0a] border border-zinc-800 p-6 rounded-3xl max-w-sm w-full flex flex-col items-center text-center shadow-2xl animate-in zoom-in-95 duration-200"
@@ -6834,12 +7443,18 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
               <Trash2 className="h-7 w-7" />
             </div>
-            <h4 className="text-white font-bold text-lg mb-1">Limpar todos os responsáveis?</h4>
+            <h4 className="text-white font-bold text-lg mb-1">
+              Limpar todos os responsáveis?
+            </h4>
             <p className="text-zinc-500 text-sm mb-1">
-              <span className="text-white font-semibold">{allResponsaveis.length} responsável(is)</span> serão removidos.
+              <span className="text-white font-semibold">
+                {allResponsaveis.length} responsável(is)
+              </span>{" "}
+              serão removidos.
             </p>
             <p className="text-zinc-600 text-xs mb-6">
-              Esta ação é irreversível. Todos os registros de responsáveis serão excluídos permanentemente do sistema.
+              Esta ação é irreversível. Todos os registros de responsáveis serão
+              excluídos permanentemente do sistema.
             </p>
             <div className="flex gap-3 w-full">
               <button
@@ -6854,7 +7469,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 disabled={limparResponsaveisLoading}
                 className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
-                {limparResponsaveisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {limparResponsaveisLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
                 Limpar tudo
               </button>
             </div>
@@ -6862,7 +7481,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         </div>
       )}
 
-            {/* ── POP DE CONFIRMAÇÃO: EXCLUIR RESPONSÁVEL ── */}
+      {/* ── POP DE CONFIRMAÇÃO: EXCLUIR RESPONSÁVEL ── */}
       {confirmDeleteResponsavel && responsavelModal && (
         <div
           className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
@@ -6875,12 +7494,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
               <Trash2 className="h-7 w-7" />
             </div>
-            <h4 className="text-white font-bold text-lg mb-1">Excluir responsável?</h4>
+            <h4 className="text-white font-bold text-lg mb-1">
+              Excluir responsável?
+            </h4>
             <p className="text-zinc-500 text-sm mb-1">
-              <span className="text-white font-semibold">{responsavelModal.nome}</span>
+              <span className="text-white font-semibold">
+                {responsavelModal.nome}
+              </span>
             </p>
             <p className="text-zinc-600 text-xs mb-6">
-              Esta ação é irreversível. O responsável será removido permanentemente.
+              Esta ação é irreversível. O responsável será removido
+              permanentemente.
             </p>
             <div className="flex gap-3 w-full">
               <button
@@ -6895,7 +7519,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 disabled={deleteResponsavelLoading}
                 className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
-                {deleteResponsavelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {deleteResponsavelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
                 Excluir
               </button>
             </div>
@@ -6916,17 +7544,23 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-4">
               <Trash2 className="h-7 w-7" />
             </div>
-            <h4 className="text-white font-bold text-lg mb-1">Remover responsável</h4>
+            <h4 className="text-white font-bold text-lg mb-1">
+              Remover responsável
+            </h4>
             <p className="text-zinc-500 text-sm mb-1">
-              <span className="text-white font-semibold">{responsavelToRemove.nome}</span>
+              <span className="text-white font-semibold">
+                {responsavelToRemove.nome}
+              </span>
             </p>
             <p className="text-zinc-600 text-xs mb-6">
-              Você pode apenas desvincular este responsável do aluno (o cadastro dele
-              continua existindo) ou excluí-lo permanentemente do sistema.
+              Você pode apenas desvincular este responsável do aluno (o cadastro
+              dele continua existindo) ou excluí-lo permanentemente do sistema.
             </p>
             <div className="flex flex-col gap-2 w-full">
               <button
-                onClick={() => handleDesassociarResponsavel(responsavelToRemove)}
+                onClick={() =>
+                  handleDesassociarResponsavel(responsavelToRemove)
+                }
                 disabled={removeResponsavelLoading}
                 className="w-full h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-sm font-semibold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all disabled:opacity-50"
               >
@@ -6938,7 +7572,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 Desassociar do aluno
               </button>
               <button
-                onClick={() => handleExcluirResponsavelFromStudent(responsavelToRemove)}
+                onClick={() =>
+                  handleExcluirResponsavelFromStudent(responsavelToRemove)
+                }
                 disabled={removeResponsavelLoading}
                 className="w-full h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
