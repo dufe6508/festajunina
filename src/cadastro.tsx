@@ -387,8 +387,14 @@ export default function CadastroApp({ onBack = () => {} }) {
     turma: string;
   } | null>(null); // Dados do aluno encontrado pelo CPF
   const [cpfLookupStatus, setCpfLookupStatus] = useState<
-    "idle" | "loading" | "found" | "not_found"
+    "idle" | "loading" | "found" | "pai_found" | "not_found"
   >("idle"); // Status da busca pelo CPF
+  const [cpfPaiData, setCpfPaiData] = useState<{
+    nome: string;
+    relacao: string;
+    alunoNome?: string;
+    alunoTurma?: string;
+  } | null>(null); // Dados do responsável encontrado pelo CPF
   const [currentUser, setCurrentUser] = useState(null);
 
   const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
@@ -628,12 +634,36 @@ export default function CadastroApp({ onBack = () => {} }) {
     return null;
   };
 
+  // Verifica se o CPF existe na coleção de responsáveis cadastrados pelo admin
+  const checkCpfInResponsaveis = async (
+    cpf: string
+  ): Promise<{ nome: string; relacao: string; alunoNome?: string; alunoTurma?: string } | null> => {
+    const cpfDigits = cpf.replace(/\D/g, "");
+    try {
+      const snap = await getDocs(collection(db, "responsaveis"));
+      for (const d of snap.docs) {
+        const data = d.data();
+        const respCpf = (data.cpf || "").replace(/\D/g, "");
+        if (respCpf === cpfDigits) {
+          return {
+            nome: data.nome || "",
+            relacao: data.relacao || "responsavel",
+            alunoNome: data.alunoNome || undefined,
+            alunoTurma: data.alunoTurma || undefined,
+          };
+        }
+      }
+    } catch {}
+    return null;
+  };
+
   // Busca automática ao digitar o CPF completo no formulário de cadastro
   const handleCpfLookup = async (cpf: string) => {
     const digits = cpf.replace(/\D/g, "");
     if (digits.length !== 11) {
       setCpfLookupStatus("idle");
       setCpfStudentData(null);
+      setCpfPaiData(null);
       setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
       return;
     }
@@ -642,6 +672,7 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (found) {
       setCpfStudentData(found);
       setCpfLookupStatus("found");
+      setCpfPaiData(null);
       setFormData((prev) => ({
         ...prev,
         ano: found.ano,
@@ -649,10 +680,26 @@ export default function CadastroApp({ onBack = () => {} }) {
         nomeAluno: found.nome,
       }));
     } else {
-      setCpfStudentData(null);
-      setCpfLookupStatus("not_found");
-      setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
-      setCpfNotFound(true);
+      // Não encontrou como aluno — verifica se é responsável cadastrado pelo admin
+      const foundPai = await checkCpfInResponsaveis(cpf);
+      if (foundPai) {
+        setCpfPaiData(foundPai);
+        setCpfLookupStatus("pai_found");
+        setCpfStudentData(null);
+        setFormData((prev) => ({
+          ...prev,
+          ano: "",
+          turma: "",
+          nomeAluno: "",
+          nomeResponsavel: foundPai.nome,
+        }));
+      } else {
+        setCpfStudentData(null);
+        setCpfPaiData(null);
+        setCpfLookupStatus("not_found");
+        setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
+        setCpfNotFound(true);
+      }
     }
   };
 
@@ -798,7 +845,9 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   const validateRegister = (isPai = false) => {
     const e = {};
-    if (formData.nomeResponsavel.length < 3)
+    // Para pais, valida o nome digitado; para alunos, o nome vem do CPF automaticamente
+    // Se cpfPaiData está disponível, o nome vem do sistema — não precisa digitar
+    if (isPai && !cpfPaiData && formData.nomeResponsavel.length < 3)
       e.nomeResponsavel = "Mínimo 3 caracteres";
     if (!validateCpf(formData.cpf)) e.cpf = "CPF inválido";
     if (!/^\S+@\S+\.\S+$/.test(formData.email)) e.email = "E-mail inválido";
@@ -825,6 +874,11 @@ export default function CadastroApp({ onBack = () => {} }) {
 
     // CPF ainda não foi verificado ou não foi encontrado
     if (cpfLookupStatus !== "found") {
+      if (cpfLookupStatus === "pai_found") {
+        // CPF de pai — chama o handler correto
+        await handleRegisterAsPai(e);
+        return;
+      }
       if (cpfLookupStatus === "not_found") {
         setCpfNotFound(true);
       } else {
@@ -855,7 +909,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       const user = userCredential.user;
 
       const userData = {
-        nomeResponsavel: formData.nomeResponsavel,
+        nomeResponsavel: formData.nomeAluno, // para alunos, o nome vem do CPF automaticamente
         cpf: formData.cpf,
         telefone: formData.telefone,
         ano: formData.ano,
@@ -884,8 +938,8 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
   // 4b. Cadastro como Pai/Responsável (CPF livre, sem vínculo com aluno)
-  const handleRegisterAsPai = async (e) => {
-    e.preventDefault();
+  const handleRegisterAsPai = async (e?) => {
+    e?.preventDefault();
     if (!validateRegister(true))
       return showToast("Corrija os erros para continuar.");
 
@@ -909,12 +963,13 @@ export default function CadastroApp({ onBack = () => {} }) {
       const user = userCredential.user;
 
       const userData = {
-        nomeResponsavel: formData.nomeResponsavel,
+        nomeResponsavel: cpfPaiData?.nome || formData.nomeResponsavel,
         cpf: formData.cpf,
         telefone: formData.telefone,
         email: formData.email,
         criadoEm: new Date().toISOString(),
         tipo: "pai",
+        relacao: cpfPaiData?.relacao || "responsavel",
         // ano e turma intencionalmente ausentes → sistema identifica como pai
       };
 
@@ -939,10 +994,10 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (!validateCpf(formData.cpf)) eErrors.cpf = "CPF inválido";
     if (formData.telefone.replace(/\D/g, "").length < 10)
       eErrors.telefone = "Telefone inválido";
-    if (!formData.ano) eErrors.ano = "Selecione o ano";
-    if (!formData.turma) eErrors.turma = "Selecione a turma";
-    if (formData.nomeAluno.length < 3)
-      eErrors.nomeAluno = "Mínimo 3 caracteres";
+    // ano, turma e nomeAluno vêm automaticamente do CPF lookup
+    if (cpfLookupStatus !== "found") {
+      eErrors.cpf = "CPF não verificado na lista de alunos";
+    }
 
     setErrors(eErrors);
     if (Object.keys(eErrors).length > 0)
@@ -972,8 +1027,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       }
 
       const userData = {
-        nomeResponsavel:
-          formData.nomeResponsavel || currentUser.nomeResponsavel,
+        nomeResponsavel: formData.nomeAluno || currentUser.nomeResponsavel,
         cpf: formData.cpf,
         telefone: formData.telefone,
         ano: formData.ano,
@@ -1276,6 +1330,7 @@ export default function CadastroApp({ onBack = () => {} }) {
         turma: currentUser.turma || "",
         ano: currentUser.ano || "",
         isTest: !!paymentData?.isTest,
+        ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
       };
 
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
@@ -1358,7 +1413,6 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   /* ─── NAV ITEMS ─── */
   const navItems = [
-    { key: "inicio", label: "Início", icon: Home },
     { key: "loja", label: "Ingressos", icon: ShoppingCart },
     { key: "ingressos", label: "Carteira", icon: TicketIcon },
     { key: "perfil", label: "Perfil", icon: User },
@@ -1509,6 +1563,10 @@ export default function CadastroApp({ onBack = () => {} }) {
                 setView("auth_choice");
                 setCpfNotFound(false);
                 setRegisterAsPai(false);
+                setCpfLookupStatus("idle");
+                setCpfStudentData(null);
+      setCpfPaiData(null);
+                setFormData((prev) => ({ ...prev, cpf: "", ano: "", turma: "", nomeAluno: "", nomeResponsavel: "" }));
               }}
               className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white mb-8 transition-colors"
             >
@@ -1518,12 +1576,15 @@ export default function CadastroApp({ onBack = () => {} }) {
               <h1 className="text-2xl font-bold text-white tracking-tight">
                 Nova conta
               </h1>
+              <p className="text-zinc-400 text-sm mt-1">
+                Comece digitando seu CPF para identificarmos você
+              </p>
             </div>
-            {/* ── CPF não encontrado: modal visual ── */}
+
+            {/* ── CPF não encontrado: tela de bloqueio ── */}
             {cpfNotFound ? (
               <div className="space-y-6">
                 {!registerAsPai ? (
-                  /* ── Tela de CPF não cadastrado ── */
                   <div className="flex flex-col items-center text-center gap-5 py-4">
                     <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                       <AlertCircle className="h-8 w-8 text-red-400" />
@@ -1544,23 +1605,18 @@ export default function CadastroApp({ onBack = () => {} }) {
                     </div>
 
                     <div className="w-full space-y-3 pt-2">
-                      {/* Botão WhatsApp */}
                       <a
                         href="https://wa.me/5531999848388?text=Ol%C3%A1!%20Tentei%20criar%20minha%20conta%20na%20Festa%20Junina%20e%20meu%20CPF%20n%C3%A3o%20foi%20reconhecido.%20Pode%20me%20ajudar%3F"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-3 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-semibold text-sm px-6 py-3.5 rounded-2xl transition-all w-full justify-center"
                       >
-                        <svg
-                          viewBox="0 0 24 24"
-                          className="w-5 h-5 fill-current shrink-0"
-                        >
+                        <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current shrink-0">
                           <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
                         </svg>
                         Falar com a organização no WhatsApp
                       </a>
 
-                      {/* Botão Sou pai */}
                       {!showPaiInfo ? (
                         <button
                           onClick={() => setShowPaiInfo(true)}
@@ -1577,9 +1633,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                           <p className="text-zinc-400 text-sm leading-relaxed">
                             Os ingressos para pais e responsáveis estarão
                             disponíveis a partir do dia{" "}
-                            <span className="text-white font-bold">
-                              21 de junho
-                            </span>
+                            <span className="text-white font-bold">21 de junho</span>
                             , com quantidade limitada. Fique de olho!
                           </p>
                         </div>
@@ -1591,13 +1645,8 @@ export default function CadastroApp({ onBack = () => {} }) {
                           setShowPaiInfo(false);
                           setCpfLookupStatus("idle");
                           setCpfStudentData(null);
-                          setFormData((prev) => ({
-                            ...prev,
-                            cpf: "",
-                            ano: "",
-                            turma: "",
-                            nomeAluno: "",
-                          }));
+      setCpfPaiData(null);
+                          setFormData((prev) => ({ ...prev, cpf: "", ano: "", turma: "", nomeAluno: "" }));
                         }}
                         className="w-full text-sm text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
                       >
@@ -1606,73 +1655,127 @@ export default function CadastroApp({ onBack = () => {} }) {
                     </div>
                   </div>
                 ) : (
-                  /* ── Formulário simplificado de pai/responsável ── */
+                  /* ── Formulário pai/responsável ── */
                   <form onSubmit={handleRegisterAsPai} className="space-y-5">
                     <div className="flex items-center gap-3 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => setRegisterAsPai(false)}
-                        className="text-zinc-500 hover:text-white transition-colors"
-                      >
+                      <button type="button" onClick={() => setRegisterAsPai(false)} className="text-zinc-500 hover:text-white transition-colors">
                         <ArrowLeft className="h-4 w-4" />
                       </button>
                       <div>
-                        <p className="text-white font-bold text-sm">
-                          Cadastro de Pai / Responsável
-                        </p>
-                        <p className="text-zinc-500 text-xs mt-0.5">
-                          Preencha seus dados para criar a conta
-                        </p>
+                        <p className="text-white font-bold text-sm">Cadastro de Pai / Responsável</p>
+                        <p className="text-zinc-500 text-xs mt-0.5">Preencha seus dados para criar a conta</p>
                       </div>
                     </div>
-
                     <div className="space-y-2">
                       <Label>Nome Completo</Label>
-                      <Input
-                        name="nomeResponsavel"
-                        value={formData.nomeResponsavel}
-                        onChange={handleChange}
-                        error={errors.nomeResponsavel}
-                        placeholder="Seu nome completo"
-                      />
-                      {errors.nomeResponsavel && (
-                        <p className="text-xs text-red-400">
-                          {errors.nomeResponsavel}
-                        </p>
-                      )}
+                      <Input name="nomeResponsavel" value={formData.nomeResponsavel} onChange={handleChange} error={errors.nomeResponsavel} placeholder="Seu nome completo" />
+                      {errors.nomeResponsavel && <p className="text-xs text-red-400">{errors.nomeResponsavel}</p>}
                     </div>
-
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>CPF</Label>
-                        <Input
-                          name="cpf"
-                          value={formData.cpf}
-                          onChange={handleChange}
-                          error={errors.cpf}
-                          placeholder="000.000.000-00"
-                          maxLength={14}
-                        />
-                        {errors.cpf && (
-                          <p className="text-xs text-red-400">{errors.cpf}</p>
-                        )}
+                        <Input name="cpf" value={formData.cpf} onChange={handleChange} error={errors.cpf} placeholder="000.000.000-00" maxLength={14} />
+                        {errors.cpf && <p className="text-xs text-red-400">{errors.cpf}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label>Telefone (WhatsApp)</Label>
-                        <Input
-                          name="telefone"
-                          maxLength={15}
-                          value={formData.telefone}
-                          onChange={handleChange}
-                          error={errors.telefone}
-                          placeholder="(00) 00000-0000"
-                        />
-                        {errors.telefone && (
-                          <p className="text-xs text-red-400">
-                            {errors.telefone}
-                          </p>
-                        )}
+                        <Input name="telefone" maxLength={15} value={formData.telefone} onChange={handleChange} error={errors.telefone} placeholder="(00) 00000-0000" />
+                        {errors.telefone && <p className="text-xs text-red-400">{errors.telefone}</p>}
                       </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>E-mail</Label>
+                      <Input name="email" type="email" value={formData.email} onChange={handleChange} error={errors.email} placeholder="seu@email.com" />
+                      {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Senha</Label>
+                        <Input name="senha" type="password" value={formData.senha} onChange={handleChange} error={errors.senha} placeholder="Mínimo 6 caracteres" />
+                        {errors.senha && <p className="text-xs text-red-400">{errors.senha}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Confirmar Senha</Label>
+                        <Input name="confirmarSenha" type="password" value={formData.confirmarSenha} onChange={handleChange} error={errors.confirmarSenha} />
+                        {errors.confirmarSenha && <p className="text-xs text-red-400">{errors.confirmarSenha}</p>}
+                      </div>
+                    </div>
+                    <Button type="submit" className="w-full mt-2" isLoading={isLoading}>
+                      Criar conta como Pai/Responsável
+                    </Button>
+                  </form>
+                )}
+              </div>
+            ) : (
+              /* ══════════════════════════════════════════
+                 NOVO FLUXO: CPF primeiro → resto depois
+                 ══════════════════════════════════════════ */
+              <form onSubmit={handleRegister} className="space-y-6">
+
+                {/* ── ETAPA 1: CPF ── */}
+                <div className="space-y-2">
+                  <Label>
+                    {cpfLookupStatus === "pai_found" ? "CPF do Responsável" : "CPF do Aluno ou Responsável"}
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      name="cpf"
+                      value={formData.cpf}
+                      onChange={handleChange}
+                      error={errors.cpf}
+                      placeholder="000.000.000-00"
+                      maxLength={14}
+                      autoFocus
+                    />
+                    {cpfLookupStatus === "loading" && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                    )}
+                    {(cpfLookupStatus === "found" || cpfLookupStatus === "pai_found") && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-400" />
+                    )}
+                  </div>
+                  {errors.cpf && <p className="text-xs text-red-400">{errors.cpf}</p>}
+                  {cpfLookupStatus === "idle" && (
+                    <p className="text-xs text-zinc-500">
+                      Digite seu CPF — alunos e responsáveis cadastrados são identificados automaticamente.
+                    </p>
+                  )}
+                  {cpfLookupStatus === "loading" && (
+                    <p className="text-xs text-zinc-500 animate-pulse">Verificando CPF no sistema...</p>
+                  )}
+                </div>
+
+                {/* ── ETAPA 2a: aluno encontrado ── */}
+                {cpfLookupStatus === "found" && (
+                  <>
+                    {/* Card com dados do aluno identificado */}
+                    <div className="rounded-2xl border border-green-500/20 bg-green-500/5 px-5 py-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                        <GraduationCap className="h-5 w-5 text-green-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold text-sm truncate">{formData.nomeAluno}</p>
+                        <p className="text-zinc-400 text-xs mt-0.5">
+                          {formData.ano}º Ano &middot; Turma {formData.turma}
+                        </p>
+                      </div>
+                      <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-green-400">
+                        <CheckCircle2 className="h-3 w-3" /> Identificado
+                      </span>
+                    </div>
+
+                    {/* Campos de conta */}
+                    <div className="space-y-2">
+                      <Label>Telefone (WhatsApp)</Label>
+                      <Input
+                        name="telefone"
+                        maxLength={15}
+                        value={formData.telefone}
+                        onChange={handleChange}
+                        error={errors.telefone}
+                        placeholder="(00) 00000-0000"
+                      />
+                      {errors.telefone && <p className="text-xs text-red-400">{errors.telefone}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -1685,12 +1788,14 @@ export default function CadastroApp({ onBack = () => {} }) {
                         error={errors.email}
                         placeholder="seu@email.com"
                       />
-                      {errors.email && (
-                        <p className="text-xs text-red-400">{errors.email}</p>
-                      )}
+                      <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        Seu ingresso e informações do evento serão enviados aqui.
+                      </p>
+                      {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
                     </div>
 
-                    <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="grid sm:grid-cols-2 gap-5">
                       <div className="space-y-2">
                         <Label>Senha</Label>
                         <Input
@@ -1701,9 +1806,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                           error={errors.senha}
                           placeholder="Mínimo 6 caracteres"
                         />
-                        {errors.senha && (
-                          <p className="text-xs text-red-400">{errors.senha}</p>
-                        )}
+                        {errors.senha && <p className="text-xs text-red-400">{errors.senha}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label>Confirmar Senha</Label>
@@ -1714,213 +1817,70 @@ export default function CadastroApp({ onBack = () => {} }) {
                           onChange={handleChange}
                           error={errors.confirmarSenha}
                         />
-                        {errors.confirmarSenha && (
-                          <p className="text-xs text-red-400">
-                            {errors.confirmarSenha}
-                          </p>
-                        )}
+                        {errors.confirmarSenha && <p className="text-xs text-red-400">{errors.confirmarSenha}</p>}
                       </div>
                     </div>
 
-                    <Button
-                      type="submit"
-                      className="w-full mt-2"
-                      isLoading={isLoading}
-                    >
+                    <Button type="submit" className="w-full mt-2" isLoading={isLoading}>
+                      Criar conta e Acessar
+                    </Button>
+                  </>
+                )}
+
+                {/* ── ETAPA 2b: responsável/pai encontrado ── */}
+                {cpfLookupStatus === "pai_found" && cpfPaiData && (
+                  <div className="space-y-5">
+                    {/* Card pai identificado */}
+                    <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 px-5 py-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                        <User className="h-5 w-5 text-blue-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold text-sm truncate">{cpfPaiData.nome}</p>
+                        <p className="text-zinc-400 text-xs mt-0.5 capitalize">
+                          {cpfPaiData.relacao}
+                          {cpfPaiData.alunoNome && ` · Pai de ${cpfPaiData.alunoNome}`}
+                        </p>
+                      </div>
+                      <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                        <CheckCircle2 className="h-3 w-3" /> Pai/Responsável
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Telefone (WhatsApp)</Label>
+                      <Input name="telefone" maxLength={15} value={formData.telefone} onChange={handleChange} error={errors.telefone} placeholder="(00) 00000-0000" />
+                      {errors.telefone && <p className="text-xs text-red-400">{errors.telefone}</p>}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>E-mail</Label>
+                      <Input name="email" type="email" value={formData.email} onChange={handleChange} error={errors.email} placeholder="seu@email.com" />
+                      <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        Seu ingresso e informações do evento serão enviados aqui.
+                      </p>
+                      {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <Label>Senha</Label>
+                        <Input name="senha" type="password" value={formData.senha} onChange={handleChange} error={errors.senha} placeholder="Mínimo 6 caracteres" />
+                        {errors.senha && <p className="text-xs text-red-400">{errors.senha}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Confirmar Senha</Label>
+                        <Input name="confirmarSenha" type="password" value={formData.confirmarSenha} onChange={handleChange} error={errors.confirmarSenha} />
+                        {errors.confirmarSenha && <p className="text-xs text-red-400">{errors.confirmarSenha}</p>}
+                      </div>
+                    </div>
+                    <Button type="button" onClick={handleRegisterAsPai} className="w-full mt-2" isLoading={isLoading}>
                       Criar conta como Pai/Responsável
                     </Button>
-                  </form>
+                  </div>
                 )}
-              </div>
-            ) : (
-              <form onSubmit={handleRegister} className="space-y-6">
-                <div className="space-y-2 text-center">
-                  <Label>Nome Completo </Label>
-                  <Input
-                    name="nomeResponsavel"
-                    value={formData.nomeResponsavel}
-                    onChange={handleChange}
-                    error={errors.nomeResponsavel}
-                  />
-                  {errors.nomeResponsavel && (
-                    <p className="text-xs text-red-400">
-                      {errors.nomeResponsavel}
-                    </p>
-                  )}
-                </div>
-                <div className="grid sm:grid-cols-2 gap-5">
-                  <div className="space-y-2 text-center">
-                    <Label>CPF</Label>
-                    <div className="relative">
-                      <Input
-                        name="cpf"
-                        value={formData.cpf}
-                        onChange={handleChange}
-                        error={errors.cpf}
-                        placeholder="000.000.000-00"
-                        maxLength={14}
-                      />
-                      {cpfLookupStatus === "loading" && (
-                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
-                      )}
-                      {cpfLookupStatus === "found" && (
-                        <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-400" />
-                      )}
-                      {cpfLookupStatus === "not_found" && (
-                        <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-red-400" />
-                      )}
-                    </div>
-                    {errors.cpf && (
-                      <p className="text-xs text-red-400">{errors.cpf}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2 text-center">
-                    <Label>Telefone (WhatsApp)</Label>
-                    <Input
-                      name="telefone"
-                      maxLength={15}
-                      value={formData.telefone}
-                      onChange={handleChange}
-                      error={errors.telefone}
-                      placeholder="(00) 00000-0000"
-                    />
-                    {errors.telefone && (
-                      <p className="text-xs text-red-400">{errors.telefone}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2 text-center">
-                  <Label>E-mail</Label>
-                  <Input
-                    name="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    error={errors.email}
-                    placeholder="seu@email.com"
-                  />
-                  <p className="text-xs text-zinc-500 flex items-center gap-1.5 mt-1">
-                    <Mail className="h-3 w-3 shrink-0" />
-                    Este e-mail será usado para enviar seu ingresso e
-                    informações do evento.
-                  </p>
-                  {errors.email && (
-                    <p className="text-xs text-red-400">{errors.email}</p>
-                  )}
-                </div>
-                <div className="grid sm:grid-cols-2 gap-5">
-                  <div className="space-y-2 text-center">
-                    <Label>Senha</Label>
-                    <Input
-                      name="senha"
-                      type="password"
-                      value={formData.senha}
-                      onChange={handleChange}
-                      error={errors.senha}
-                      placeholder="Mínimo 6 caracteres"
-                    />
-                    {errors.senha && (
-                      <p className="text-xs text-red-400">{errors.senha}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2 text-center">
-                    <Label>Confirmar Senha</Label>
-                    <Input
-                      name="confirmarSenha"
-                      type="password"
-                      value={formData.confirmarSenha}
-                      onChange={handleChange}
-                      error={errors.confirmarSenha}
-                    />
-                    {errors.confirmarSenha && (
-                      <p className="text-xs text-red-400">
-                        {errors.confirmarSenha}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* ── Dados Escolares: preenchidos automaticamente pelo CPF ── */}
-                <div
-                  className={`pt-6 mt-6 border-t border-zinc-800 transition-all duration-300 ${
-                    cpfLookupStatus === "found"
-                      ? "opacity-100"
-                      : "opacity-40 pointer-events-none select-none"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-5">
-                    <p className="text-xs font-bold uppercase tracking-wider text-white">
-                      Dados Escolares
-                    </p>
-                    {cpfLookupStatus === "found" ? (
-                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-green-400">
-                        <CheckCircle2 className="h-3 w-3" /> Preenchido
-                        automaticamente
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-zinc-600 font-medium">
-                        Preencha o CPF para liberar
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid sm:grid-cols-2 gap-5">
-                    <div className="space-y-2">
-                      <Label>Ano</Label>
-                      <div className="flex h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 items-center gap-2">
-                        {cpfLookupStatus === "found" ? (
-                          <>
-                            <GraduationCap className="h-4 w-4 text-zinc-500 shrink-0" />
-                            <span className="text-white text-sm font-semibold">
-                              {formData.ano}º Ano
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-zinc-600 text-sm">—</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Turma</Label>
-                      <div className="flex h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 items-center gap-2">
-                        {cpfLookupStatus === "found" ? (
-                          <>
-                            <BookOpen className="h-4 w-4 text-zinc-500 shrink-0" />
-                            <span className="text-white text-sm font-semibold">
-                              Turma {formData.turma}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-zinc-600 text-sm">—</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2 mt-5">
-                    <Label>Nome do Aluno</Label>
-                    <div className="flex h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 items-center gap-2">
-                      {cpfLookupStatus === "found" ? (
-                        <>
-                          <User className="h-4 w-4 text-zinc-500 shrink-0" />
-                          <span className="text-white text-sm font-semibold">
-                            {formData.nomeAluno}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-zinc-600 text-sm">—</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full mt-4"
-                  isLoading={isLoading}
-                >
-                  Criar conta e Acessar
-                </Button>
               </form>
-            )}{" "}
-            {/* fim do bloco cpfNotFound / form */}
+            )}
+
             {toast && (
               <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-50">
                 <AlertCircle className="h-5 w-5 text-red-400" />
@@ -2024,6 +1984,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                       setShowPaiInfo(false);
                       setCpfLookupStatus("idle");
                       setCpfStudentData(null);
+      setCpfPaiData(null);
                       setFormData((prev) => ({
                         ...prev,
                         cpf: "",
@@ -2040,23 +2001,13 @@ export default function CadastroApp({ onBack = () => {} }) {
               </div>
             ) : (
               <form onSubmit={handleCompleteProfile} className="space-y-6">
-                <div className="space-y-2 text-center">
-                  <Label>Nome Completo </Label>
-                  <Input
-                    name="nomeResponsavel"
-                    value={formData.nomeResponsavel || ""}
-                    onChange={handleChange}
-                    error={errors.nomeResponsavel}
-                  />
-                  {errors.nomeResponsavel && (
-                    <p className="text-xs text-red-400">
-                      {errors.nomeResponsavel}
-                    </p>
-                  )}
-                </div>
-                <div className="grid sm:grid-cols-2 gap-5">
-                  <div className="space-y-2 text-center">
-                    <Label>CPF</Label>
+
+                {/* ── ETAPA 1: CPF ── */}
+                <div className="space-y-2">
+                  <Label>
+                    {cpfLookupStatus === "pai_found" ? "CPF do Responsável" : "CPF do Aluno ou Responsável"}
+                  </Label>
+                  <div className="relative">
                     <Input
                       name="cpf"
                       value={formData.cpf || ""}
@@ -2064,98 +2015,76 @@ export default function CadastroApp({ onBack = () => {} }) {
                       error={errors.cpf}
                       placeholder="000.000.000-00"
                       maxLength={14}
+                      autoFocus
                     />
-                    {errors.cpf && (
-                      <p className="text-xs text-red-400">{errors.cpf}</p>
+                    {cpfLookupStatus === "loading" && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 animate-spin" />
+                    )}
+                    {(cpfLookupStatus === "found" || cpfLookupStatus === "pai_found") && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-400" />
                     )}
                   </div>
-                  <div className="space-y-2 text-center">
-                    <Label>Telefone (WhatsApp)</Label>
-                    <Input
-                      name="telefone"
-                      maxLength={15}
-                      value={formData.telefone || ""}
-                      onChange={handleChange}
-                      error={errors.telefone}
-                      placeholder="(00) 00000-0000"
-                    />
-                    {errors.telefone && (
-                      <p className="text-xs text-red-400">{errors.telefone}</p>
-                    )}
-                  </div>
+                  {errors.cpf && <p className="text-xs text-red-400">{errors.cpf}</p>}
+                  {cpfLookupStatus === "idle" && (
+                    <p className="text-xs text-zinc-500">
+                      Digite seu CPF — alunos e responsáveis cadastrados são identificados automaticamente.
+                    </p>
+                  )}
+                  {cpfLookupStatus === "loading" && (
+                    <p className="text-xs text-zinc-500 animate-pulse">Verificando CPF no sistema...</p>
+                  )}
                 </div>
 
-                <div className="pt-6 mt-6 border-t border-zinc-800">
-                  <p className="text-xs font-bold uppercase tracking-wider text-white mb-5">
-                    Dados Escolares
-                  </p>
-                  <div className="grid sm:grid-cols-2 gap-5">
-                    <div className="space-y-2 text-center">
-                      <Label>Ano</Label>
-                      <Select
-                        name="ano"
-                        value={formData.ano || ""}
-                        onChange={handleChange}
-                        error={errors.ano}
-                        placeholder="Selecione"
-                        options={[
-                          { value: "1", label: "1º Ano" },
-                          { value: "2", label: "2º Ano" },
-                          { value: "3", label: "3º Ano" },
-                        ]}
-                      />
-                      {errors.ano && (
-                        <p className="text-xs text-red-400">{errors.ano}</p>
-                      )}
+                {/* ── ETAPA 2: exibida após CPF encontrado ── */}
+                {cpfLookupStatus === "found" && (
+                  <>
+                    {/* Card com dados identificados */}
+                    <div className="rounded-2xl border border-green-500/20 bg-green-500/5 px-5 py-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                        <GraduationCap className="h-5 w-5 text-green-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold text-sm truncate">{formData.nomeAluno}</p>
+                        <p className="text-zinc-400 text-xs mt-0.5">
+                          {formData.ano}º Ano &middot; Turma {formData.turma}
+                        </p>
+                      </div>
+                      <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-green-400">
+                        <CheckCircle2 className="h-3 w-3" /> Identificado
+                      </span>
                     </div>
-                    <div className="space-y-2 text-center">
-                      <Label>Turma</Label>
-                      <Select
-                        name="turma"
-                        value={formData.turma || ""}
+
+                    {/* Só telefone — o resto vem automático */}
+                    <div className="space-y-2">
+                      <Label>Telefone (WhatsApp)</Label>
+                      <Input
+                        name="telefone"
+                        maxLength={15}
+                        value={formData.telefone || ""}
                         onChange={handleChange}
-                        error={errors.turma}
-                        placeholder="Selecione"
-                        options={Array.from({ length: 12 }, (_, i) => ({
-                          value: String.fromCharCode(65 + i),
-                          label: `Turma ${String.fromCharCode(65 + i)}`,
-                        }))}
+                        error={errors.telefone}
+                        placeholder="(00) 00000-0000"
                       />
-                      {errors.turma && (
-                        <p className="text-xs text-red-400">{errors.turma}</p>
-                      )}
+                      {errors.telefone && <p className="text-xs text-red-400">{errors.telefone}</p>}
                     </div>
-                  </div>
-                  <div className="space-y-2 mt-5">
-                    <Label>Nome do Aluno</Label>
-                    <Input
-                      name="nomeAluno"
-                      value={formData.nomeAluno || ""}
-                      onChange={handleChange}
-                      error={errors.nomeAluno}
-                    />
-                    {errors.nomeAluno && (
-                      <p className="text-xs text-red-400">{errors.nomeAluno}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="pt-2">
-                  <Button
-                    type="submit"
-                    className="w-full mt-4 h-12"
-                    isLoading={isLoading}
-                  >
-                    Salvar e Continuar
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full mt-2"
-                    onClick={handleLogout}
-                  >
+
+                    <div className="pt-2">
+                      <Button type="submit" className="w-full mt-2 h-12" isLoading={isLoading}>
+                        Salvar e Continuar
+                      </Button>
+                      <Button type="button" variant="ghost" className="w-full mt-2" onClick={confirmLogout}>
+                        Cancelar e sair
+                      </Button>
+                    </div>
+                  </>
+                )}
+
+                {/* Botão cancelar visível enquanto aguarda CPF */}
+                {cpfLookupStatus !== "found" && (
+                  <Button type="button" variant="ghost" className="w-full" onClick={confirmLogout}>
                     Cancelar e sair
                   </Button>
-                </div>
+                )}
               </form>
             )}{" "}
             {/* fim do bloco cpfNotFound / form */}
@@ -2228,10 +2157,6 @@ export default function CadastroApp({ onBack = () => {} }) {
               <button
                 key={key}
                 onClick={() => {
-                  if (key === "inicio") {
-                    onBack();
-                    return;
-                  }
                   setActiveTab(key);
                   if (window.innerWidth < 1024) setSidebarOpen(false);
                 }}
@@ -2278,18 +2203,18 @@ export default function CadastroApp({ onBack = () => {} }) {
             {/* Botão Retornar à Landing Page */}
             <button
               onClick={onBack}
-              title="Voltar ao Site"
+              title="Página Inicial"
               className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center h-12 rounded-xl text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all whitespace-nowrap ${
                 sidebarOpen ? "lg:px-3 lg:justify-start" : ""
               }`}
             >
-              <ArrowLeft className="h-5 w-5 shrink-0" />
+              <Home className="h-5 w-5 shrink-0" />
               <span
                 className={`transition-all duration-300 ${
                   sidebarOpen ? "opacity-100 block" : "lg:hidden opacity-0 w-0"
                 }`}
               >
-                Voltar ao Site
+                Página Inicial
               </span>
             </button>
 
@@ -2635,6 +2560,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                       </h3>
                     </div>
                     {purchasedTickets.map((t) => {
+                      const isPaiTicket = t.tipoTitular === "responsavel" || currentUser?.tipo === "pai";
                       const anoDoTicket = t.ano || currentUser?.ano;
                       const turmaDoTicket = t.turma || currentUser?.turma;
                       const turmaLabel =
@@ -2659,7 +2585,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                             <div className="flex-1 w-full space-y-4">
                               <div>
                                 <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
-                                  Passaporte
+                                  {isPaiTicket ? "Ingresso de Pai/Responsável" : "Passaporte"}
                                   {t.isTest && (
                                     <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[9px] font-bold tracking-widest">
                                       TESTE
@@ -2674,21 +2600,24 @@ export default function CadastroApp({ onBack = () => {} }) {
                               <div className="grid grid-cols-2 gap-3">
                                 <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
                                   <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
-                                    Aluno
+                                    {isPaiTicket ? "Responsável" : "Aluno"}
                                   </p>
                                   <p className="text-sm font-semibold text-white truncate">
                                     {t.nomeAluno ||
                                       currentUser?.nomeAluno ||
+                                      currentUser?.nomeResponsavel ||
                                       "—"}
                                   </p>
                                 </div>
 
                                 <div className="bg-black border border-zinc-800 rounded-xl px-4 py-3">
                                   <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
-                                    Turma
+                                    {isPaiTicket ? "Tipo" : "Turma"}
                                   </p>
                                   <p className="text-sm font-semibold text-white truncate">
-                                    {turmaLabel || "—"}
+                                    {isPaiTicket
+                                      ? (currentUser?.relacao ? currentUser.relacao.charAt(0).toUpperCase() + currentUser.relacao.slice(1) : "Pai/Responsável")
+                                      : (turmaLabel || "—")}
                                   </p>
                                 </div>
 
