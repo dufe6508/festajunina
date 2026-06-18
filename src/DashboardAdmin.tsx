@@ -1233,6 +1233,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         ano: studentModal.ano,
         turma: studentModal.turma,
         type: loteSelecionado?.nome || "Acesso Geral",
+        loteId: loteSelecionado?.id || null,
         qty: 1,
         price: loteSelecionado?.preco || 0,
         code: uniqueCode,
@@ -1904,6 +1905,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           ? responsavelModal.alunoTurma.slice(1)
           : "",
         type: loteSelecionado?.nome || "Acesso Geral",
+        loteId: loteSelecionado?.id || null,
         qty: 1,
         price: loteSelecionado?.preco || 0,
         code: uniqueCode,
@@ -2466,6 +2468,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         ano: addTicketForm.ano,
         turma: addTicketForm.turma,
         type: loteSelecionado?.nome || "Acesso Geral",
+        loteId: loteSelecionado?.id || null,
         qty: 1,
         price: loteSelecionado?.preco || 0,
         code: uniqueCode,
@@ -4307,10 +4310,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
                     const vendidos = (allTickets || []).filter(
-                      (t) => t.pagamentoConfirmado && t.type === batch.nome
+                      (t) => t.pagamentoConfirmado && (t.loteId === batch.id || t.type === batch.nome)
                     ).length;
                     const totalNaDB = (allTickets || []).filter(
-                      (t) => t.type === batch.nome
+                      (t) => t.loteId === batch.id || t.type === batch.nome
                     ).length;
                     const limite = Number(batch.quantidade) || 0;
                     const pct = limite > 0 ? Math.min(100, (totalNaDB / limite) * 100) : 0;
@@ -9319,10 +9322,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             <p className="text-zinc-400 text-sm leading-relaxed">
               Tem certeza que deseja excluir o lote{" "}
               <span className="text-white font-semibold">"{confirmDeleteBatch.nome}"</span>?
-              {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length > 0 && (
+              {(allTickets || []).filter((t) => t.loteId === confirmDeleteBatch.id || t.type === confirmDeleteBatch.nome).length > 0 && (
                 <span className="block mt-2 text-amber-400 text-xs font-semibold">
                   ⚠ Atenção: existem{" "}
-                  {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length}{" "}
+                  {(allTickets || []).filter((t) => t.loteId === confirmDeleteBatch.id || t.type === confirmDeleteBatch.nome).length}{" "}
                   ingresso(s) vinculado(s) a este lote.
                 </span>
               )}
