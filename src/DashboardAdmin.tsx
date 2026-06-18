@@ -4279,7 +4279,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <Button
                     variant="outline"
-                    onClick={fetchBatches}
+                    onClick={() => { fetchBatches(); fetchAllTicketsForAdmin(); }}
                     isLoading={loadingBatches}
                     className="flex-1 sm:flex-none"
                   >
