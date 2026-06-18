@@ -383,6 +383,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<
     any[]
   >([]);
+  // Edição inline do CPF do aluno (usado quando o aluno foi importado sem CPF)
+  const [editingStudentCpf, setEditingStudentCpf] = useState(false);
+  const [editStudentCpfValue, setEditStudentCpfValue] = useState("");
+  const [editStudentCpfError, setEditStudentCpfError] = useState("");
+  const [savingStudentCpf, setSavingStudentCpf] = useState(false);
 
   // Estados: Responsáveis
   const [responsavelSearch, setResponsavelSearch] = useState("");
@@ -638,40 +643,148 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       document.head.appendChild(s);
     });
 
-  // Lê um File (.xlsx ou .csv) e retorna array de objetos linha
+  // Tenta extrair "ano" e "turma" de um texto de série/turma vindo do
+  // cabeçalho institucional da planilha da escola, ex: "2º A", "3º E".
+  // Retorna null se não conseguir reconhecer o padrão.
+  const parseAnoTurmaFromHeaderText = (
+    text: string
+  ): { ano: string; turma: string } | null => {
+    const t = String(text || "").trim();
+    // Aceita "2º A", "2º  A", "2A", "2 - A", etc.
+    const m = t.match(/([123])\s*[º°]?\s*[-–]?\s*([A-Za-z])\b/);
+    if (!m) return null;
+    return { ano: m[1], turma: m[2].toUpperCase() };
+  };
+
+  // Detecta se uma aba está no formato "institucional" da escola:
+  // linhas de cabeçalho fixas (escola, título, nível/série/turno) seguidas
+  // de uma linha "Nº | Nome | | CPF" e então os alunos.
+  // Retorna o índice da linha de dados (primeira linha após o cabeçalho
+  // "Nº/Nome/CPF") e o ano/turma encontrados, ou null se não reconhecer.
+  const detectSchoolSheetFormat = (
+    raw: any[][]
+  ): { ano: string; turma: string; dataStartRow: number } | null => {
+    let ano = "";
+    let turma = "";
+    let headerRowIdx = -1;
+
+    for (let i = 0; i < Math.min(raw.length, 15); i++) {
+      const row = raw[i] || [];
+      const rowText = row.map((c) => String(c ?? "")).join(" | ");
+
+      // Linha "Nivel de Ensino: ... 2º A" ou "Ano/Sêrie/Etapa: ... 2º REG 1"
+      if (/nivel de ensino|ano\/s[eê]rie|s[eé]rie\/etapa/i.test(rowText)) {
+        for (const cell of row) {
+          const parsed = parseAnoTurmaFromHeaderText(String(cell ?? ""));
+          if (parsed) {
+            ano = parsed.ano;
+            turma = parsed.turma;
+          }
+        }
+      }
+
+      // Linha de cabeçalho da tabela: "Nº | Nome | | CPF"
+      // Observação: "º" (U+00BA, indicador ordinal) não é removido pela
+      // normalização NFD acima porque não é um diacrítico combinável —
+      // por isso é removido explicitamente aqui.
+      const normCells = row.map((c) =>
+        String(c ?? "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[º°]/g, "")
+          .trim()
+      );
+      if (
+        normCells.some((c) => c === "no" || c === "n" || c === "n.") &&
+        normCells.some((c) => c === "nome") &&
+        normCells.some((c) => c === "cpf")
+      ) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+
+    if (headerRowIdx === -1 || !ano || !turma) return null;
+    return { ano, turma, dataStartRow: headerRowIdx + 1 };
+  };
+
+  // Lê um File (.xlsx ou .csv) e retorna array de objetos linha,
+  // já com { nome, ano, turma, cpf, _row, _sheet }.
+  // Suporta dois formatos:
+  //  1) "Institucional" (planilha da escola): uma aba por turma, com
+  //     cabeçalho fixo (escola, nível, série/turma, turno) nas primeiras
+  //     linhas e alunos a partir da linha "Nº | Nome | | CPF". TODAS as
+  //     abas do arquivo são lidas, não só a primeira.
+  //  2) "Genérico": primeira linha com cabeçalho de colunas
+  //     (ano, turma, nome, cpf) — comportamento legado, mantido para
+  //     planilhas simples de uma aba só.
   const parseFile = async (file: File): Promise<any[]> => {
     const XLSX = await loadXLSX();
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: "array", raw: false });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    // header: 1 → array de arrays; depois convertemos para objetos
-    const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
-      header: 1,
-      defval: "",
-    });
-    if (raw.length < 2) return [];
-    const headers = (raw[0] as string[]).map((h) =>
-      String(h)
-        .trim()
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, "")
-    );
-    return raw
-      .slice(1)
-      .map((row, idx) => {
-        const obj: any = { _row: idx + 2 };
-        headers.forEach((h, i) => {
-          obj[h] = String(row[i] ?? "").trim();
-        });
-        return obj;
-      })
-      .filter((obj) =>
-        Object.entries(obj)
-          .filter(([k]) => k !== "_row")
-          .some(([, v]) => String(v).trim() !== "")
+
+    const allRows: any[] = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
+        header: 1,
+        defval: "",
+      });
+      if (raw.length === 0) continue;
+
+      const schoolFormat = detectSchoolSheetFormat(raw);
+
+      if (schoolFormat) {
+        // Formato institucional: colunas fixas Nº(0) | Nome(2) | CPF(3)
+        const { ano, turma, dataStartRow } = schoolFormat;
+        for (let i = dataStartRow; i < raw.length; i++) {
+          const row = raw[i] || [];
+          const nome = String(row[2] ?? row[1] ?? "").trim();
+          const cpf = String(row[3] ?? "").trim();
+          if (!nome) continue; // pula linhas vazias da numeração residual
+          allRows.push({
+            nome,
+            ano,
+            turma,
+            cpf,
+            _row: i + 1,
+            _sheet: sheetName,
+          });
+        }
+        continue;
+      }
+
+      // Formato genérico: primeira linha é cabeçalho de colunas
+      if (raw.length < 2) continue;
+      const headers = (raw[0] as string[]).map((h) =>
+        String(h)
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "")
       );
+      const genericRows = raw
+        .slice(1)
+        .map((row, idx) => {
+          const obj: any = { _row: idx + 2, _sheet: sheetName };
+          headers.forEach((h, i) => {
+            obj[h] = String(row[i] ?? "").trim();
+          });
+          return obj;
+        })
+        .filter((obj) =>
+          Object.entries(obj)
+            .filter(([k]) => k !== "_row" && k !== "_sheet")
+            .some(([, v]) => String(v).trim() !== "")
+        );
+      allRows.push(...genericRows);
+    }
+
+    return allRows;
   };
 
   // Normaliza os dados para o formato esperado: nome, turma, ano, cpf
@@ -695,6 +808,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   };
 
   // Valida uma linha normalizada
+  // CPF é opcional: se vier vazio, o aluno é importado sem CPF (a escola
+  // pode completar depois pelo modal do aluno). Se vier preenchido mas
+  // com formato inválido, ainda bloqueia a importação dessa linha.
   const validateRow = (
     r: { nome: string; turma: string; ano: string; cpf: string },
     rowNum: number
@@ -705,7 +821,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
     if (!/^[A-L]$/.test(r.turma))
       return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
-    if (r.cpf.length !== 11)
+    if (r.cpf && r.cpf.length !== 11)
       return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
     return null;
   };
@@ -815,7 +931,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           failed++;
           continue;
         }
-        if (cpfsExistentes.has(row.cpf)) {
+        // Só verifica duplicidade quando o aluno tem CPF — sem CPF, não
+        // há como saber se é duplicata, então sempre importa e deixa a
+        // escola conferir manualmente depois (ver indicador "sem CPF").
+        if (row.cpf && cpfsExistentes.has(row.cpf)) {
           duplicates++;
           continue;
         }
@@ -838,11 +957,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             nome: row.nome,
             turma: row.turma,
             ano: row.ano,
-            cpf: row.cpf,
+            cpf: row.cpf || "",
             sala: turmaId,
             cadastradoEm: new Date().toISOString(),
           });
-          cpfsExistentes.add(row.cpf);
+          if (row.cpf) cpfsExistentes.add(row.cpf);
           success++;
         } catch (e) {
           console.error("Erro ao salvar aluno:", row, e);
@@ -1137,6 +1256,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setStudentModalTicket(null);
     setStudentModalResponsaveis([]);
     setStudentModalLoading(true);
+    setEditingStudentCpf(false);
+    setEditStudentCpfValue("");
+    setEditStudentCpfError("");
     setAssociarForm({
       loteId: "",
       email: "",
@@ -1183,6 +1305,49 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
     } catch {}
     setStudentModalLoading(false);
+  };
+
+  // ── Salva (adiciona ou edita) o CPF do aluno a partir do modal ──
+  // Usado principalmente para completar o CPF de alunos importados sem
+  // CPF (ver indicador "sem CPF" na lista da turma).
+  const handleSaveStudentCpf = async () => {
+    if (!studentModal) return;
+    const digits = editStudentCpfValue.replace(/\D/g, "");
+    if (digits && digits.length !== 11) {
+      setEditStudentCpfError("CPF deve ter 11 dígitos");
+      return;
+    }
+    setEditStudentCpfError("");
+    setSavingStudentCpf(true);
+    try {
+      const turmaId =
+        studentModal.turmaId || `${studentModal.ano}${studentModal.turma}`;
+      const nomeId =
+        studentModal.id || studentModal.nome?.trim().replace(/\s+/g, "_");
+      await updateDoc(doc(db, "alunos", turmaId, "lista", nomeId), {
+        cpf: digits,
+      });
+      const updated = { ...studentModal, cpf: digits };
+      setStudentModal(updated);
+      setClassesData((prev) => {
+        const lista = prev[turmaId];
+        if (!lista) return prev;
+        return {
+          ...prev,
+          [turmaId]: lista.map((a) =>
+            (a.id || a.nome) === (studentModal.id || studentModal.nome)
+              ? { ...a, cpf: digits }
+              : a
+          ),
+        };
+      });
+      setEditingStudentCpf(false);
+      showToast("CPF atualizado com sucesso!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar CPF.");
+    }
+    setSavingStudentCpf(false);
   };
 
   // ── Associar ingresso a um aluno pelo modal ──
@@ -6250,6 +6415,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                   /\D/g,
                                   ""
                                 );
+                                const semCpf = !cpfDigits;
                                 const hasTicket = allTickets.some(
                                   (t) =>
                                     (t.cpf || "").replace(/\D/g, "") ===
@@ -6269,6 +6435,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     </span>
                                     <div className="min-w-0 pr-3">
                                       <div className="flex items-center gap-2">
+                                        {semCpf && (
+                                          <AlertTriangle
+                                            className="h-3.5 w-3.5 text-red-500 shrink-0"
+                                            title="Aluno sem CPF cadastrado"
+                                          />
+                                        )}
                                         <p className="text-white font-medium text-sm truncate">
                                           {aluno.nome}
                                         </p>
@@ -6279,8 +6451,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                         )}
                                       </div>
                                     </div>
-                                    <span className="text-zinc-500 font-mono text-xs tabular-nums">
-                                      {formatCpf(aluno.cpf)}
+                                    <span
+                                      className={`font-mono text-xs tabular-nums ${
+                                        semCpf
+                                          ? "text-red-400 font-semibold"
+                                          : "text-zinc-500"
+                                      }`}
+                                    >
+                                      {semCpf
+                                        ? "sem CPF"
+                                        : formatCpf(aluno.cpf)}
                                     </span>
                                     <div className="flex justify-end">
                                       <button
@@ -6415,8 +6595,92 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       Dados Cadastrais
                     </p>
                     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                      {/* CPF — com edição inline, já que alunos importados
+                          sem CPF precisam poder completá-lo aqui */}
+                      <div className="flex items-center justify-between px-4 py-3 gap-3">
+                        <span className="text-zinc-500 text-xs font-semibold shrink-0">
+                          CPF
+                        </span>
+                        {editingStudentCpf ? (
+                          <div className="flex items-center gap-2 flex-1 justify-end">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={editStudentCpfValue}
+                              onChange={(e) => {
+                                setEditStudentCpfValue(
+                                  applyCpfMask(e.target.value)
+                                );
+                                setEditStudentCpfError("");
+                              }}
+                              placeholder="000.000.000-00"
+                              className="w-36 bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-xs font-mono text-white text-right focus:outline-none focus:border-zinc-500"
+                            />
+                            <button
+                              onClick={handleSaveStudentCpf}
+                              disabled={savingStudentCpf}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+                              title="Salvar"
+                            >
+                              {savingStudentCpf ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setEditingStudentCpf(false)}
+                              disabled={savingStudentCpf}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-800 transition-colors"
+                              title="Cancelar"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            {!studentModal.cpf && (
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+                            )}
+                            <span
+                              className={`text-xs font-mono ${
+                                studentModal.cpf
+                                  ? "text-white"
+                                  : "text-red-400 font-semibold"
+                              }`}
+                            >
+                              {studentModal.cpf
+                                ? formatCpf(studentModal.cpf)
+                                : "sem CPF"}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setEditStudentCpfValue(
+                                  studentModal.cpf
+                                    ? applyCpfMask(studentModal.cpf)
+                                    : ""
+                                );
+                                setEditStudentCpfError("");
+                                setEditingStudentCpf(true);
+                              }}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                              title={
+                                studentModal.cpf
+                                  ? "Editar CPF"
+                                  : "Adicionar CPF"
+                              }
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {editingStudentCpf && editStudentCpfError && (
+                        <p className="text-red-400 text-[11px] px-4 pb-2 -mt-1">
+                          {editStudentCpfError}
+                        </p>
+                      )}
                       {[
-                        { label: "CPF", value: formatCpf(studentModal.cpf) },
                         {
                           label: "E-mail",
                           value: studentModal._userData?.email || null,
