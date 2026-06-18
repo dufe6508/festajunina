@@ -327,6 +327,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [generatedTicket, setGeneratedTicket] = useState(null);
   const [revenueModalOpen, setRevenueModalOpen] = useState(false); // modal de receita detalhada
+  const [presencaListModal, setPresencaListModal] = useState<null | "todos" | "entraram" | "pendentes">(null); // modal lista de ingressos na tela de presença
 
   // Estados: Importação de Alunos
   const [importFiles, setImportFiles] = useState<File[]>([]);
@@ -3499,27 +3500,31 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   {/* Resumo total */}
                   <div className="grid grid-cols-3 gap-3 pt-2">
                     {[
-                      { label: "Total Vendidos", val: allTickets.length },
+                      { label: "Total Vendidos", val: allTickets.length, key: "todos" },
                       {
                         label: "Entraram",
                         val: allTickets.filter((t) => t.usado).length,
+                        key: "entraram",
                       },
                       {
                         label: "Pendentes",
                         val: allTickets.filter((t) => !t.usado).length,
+                        key: "pendentes",
                       },
-                    ].map(({ label, val }) => (
-                      <div
+                    ].map(({ label, val, key }) => (
+                      <button
                         key={label}
-                        className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-4 text-center"
+                        onClick={() => setPresencaListModal(key as any)}
+                        className="group bg-[#0a0a0a] border border-zinc-800 hover:border-zinc-600 rounded-2xl p-4 text-center transition-all relative overflow-hidden"
                       >
-                        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">
                           {label}
                         </p>
                         <p className="text-3xl font-black text-white mt-1">
                           {val}
                         </p>
-                      </div>
+                        <ChevronRight className="absolute bottom-3 right-3 w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-500 transition-colors" />
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -9505,6 +9510,145 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           {toast.message}
         </div>
       )}
+
+      {/* ── MODAL: LISTA DE INGRESSOS (Presença) ── */}
+      {presencaListModal && (() => {
+        const filteredTickets =
+          presencaListModal === "entraram"
+            ? allTickets.filter((t) => t.usado)
+            : presencaListModal === "pendentes"
+            ? allTickets.filter((t) => !t.usado)
+            : allTickets;
+
+        const titulo =
+          presencaListModal === "entraram"
+            ? "Entraram"
+            : presencaListModal === "pendentes"
+            ? "Pendentes"
+            : "Todos os Ingressos";
+
+        const sorted = [...filteredTickets].sort((a, b) =>
+          (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
+        );
+
+        return (
+          <div
+            className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setPresencaListModal(null)}
+          >
+            <div
+              className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg shadow-2xl flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800/60 shrink-0">
+                <div>
+                  <h3 className="text-white font-bold text-lg tracking-tight">
+                    {titulo}
+                  </h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">
+                    {sorted.length} ingresso{sorted.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <button
+                  className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                  onClick={() => setPresencaListModal(null)}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Filtros rápidos */}
+              <div className="flex gap-2 px-6 py-3 border-b border-zinc-800/40 shrink-0">
+                {(["todos", "entraram", "pendentes"] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setPresencaListModal(f)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${
+                      presencaListModal === f
+                        ? "bg-white text-black"
+                        : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
+                    }`}
+                  >
+                    {f === "todos" ? "Todos" : f === "entraram" ? "Entraram" : "Pendentes"}
+                    <span className="ml-1.5 opacity-60">
+                      {f === "todos"
+                        ? allTickets.length
+                        : f === "entraram"
+                        ? allTickets.filter((t) => t.usado).length
+                        : allTickets.filter((t) => !t.usado).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Lista */}
+              <div className="overflow-y-auto flex-1">
+                {sorted.length === 0 ? (
+                  <div className="py-16 flex flex-col items-center gap-3 text-zinc-600">
+                    <Ticket className="w-10 h-10 opacity-20" />
+                    <p className="text-sm">Nenhum ingresso encontrado.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-zinc-800/50">
+                    {sorted.map((t) => (
+                      <div
+                        key={t.id}
+                        className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-900/40 transition-colors"
+                      >
+                        {/* Ícone de status */}
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            t.usado
+                              ? "bg-green-500/15 border border-green-500/30"
+                              : "bg-zinc-800 border border-zinc-700"
+                          }`}
+                        >
+                          {t.usado ? (
+                            <CheckCircle2 className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-zinc-500" />
+                          )}
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-semibold truncate leading-tight">
+                            {t.nomeAluno || "—"}
+                          </p>
+                          <p className="text-zinc-500 text-xs mt-0.5 truncate">
+                            {t.ano ? `${t.ano}º Ano` : ""}
+                            {t.ano && t.turma ? ` · Turma ${t.turma}` : ""}
+                            {t.type ? ` · ${t.type}` : ""}
+                          </p>
+                        </div>
+
+                        {/* Código + badge */}
+                        <div className="text-right shrink-0">
+                          <p className="text-zinc-400 font-mono text-xs font-bold">
+                            {t.code || t.id}
+                          </p>
+                          <span
+                            className={`inline-block mt-1 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                              t.usado
+                                ? "bg-green-500/15 text-green-400"
+                                : t.pagamentoConfirmado
+                                ? "bg-blue-500/15 text-blue-400"
+                                : "bg-zinc-800 text-zinc-500"
+                            }`}
+                          >
+                            {t.usado ? "Entrou" : t.pagamentoConfirmado ? "Pago" : "Pendente"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
