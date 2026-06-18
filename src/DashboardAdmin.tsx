@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Loader2,
@@ -290,7 +291,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
-  const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(null); // Excluir lote
+  const [confirmDeleteBatchModal, setConfirmDeleteBatchModal] = useState(null); // Excluir lote
   const [deletingBatch, setDeletingBatch] = useState(false);
 
   // Estados: Busca de aluno no formulário de adicionar ingresso
@@ -2310,6 +2311,21 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setLoadingBatches(false);
   };
 
+  const handleDeleteBatch = async () => {
+    if (!confirmDeleteBatchModal) return;
+    setDeletingBatch(true);
+    try {
+      const batch = confirmDeleteBatchModal;
+      await deleteDoc(doc(db, "lotes", batch.id));
+      setBatches((prev) => prev.filter((b) => b.id !== batch.id));
+      showToast("Lote excluído com sucesso.", "success");
+      setConfirmDeleteBatchModal(null);
+    } catch (error) {
+      showToast("Erro ao excluir o lote.");
+    }
+    setDeletingBatch(false);
+  };
+
   // DashboardAdmin.tsx — linha 1230
   const processScan = (code) => {
     // Remove o '#' inicial se vier do input manual ou de um QR que contenha '#'
@@ -4311,9 +4327,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
                     const vendidos = (allTickets || []).filter(
-                      (t) => t.pagamentoConfirmado && t.type === batch.nome
-                    ).length;
-                    const totalNaDB = (allTickets || []).filter(
                       (t) => t.type === batch.nome
                     ).length;
                     const limite = Number(batch.quantidade) || 0;
@@ -4375,8 +4388,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         {/* Pills de info */}
                         <div className="flex flex-wrap gap-1.5">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
-                            <Ticket className="w-3 h-3" /> {totalNaDB}/{batch.quantidade}{" "}
-                            ingressos
+                            <Ticket className="w-3 h-3" />{" "}
+                            {Math.max(0, (Number(batch.quantidade) || 0) - vendidos)}/{batch.quantidade}{" "}
+                            disponíveis
                           </span>
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
                             <User className="w-3 h-3" />{" "}
@@ -4501,9 +4515,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             )}
                           </button>
                           <button
-                            onClick={() => setConfirmDeleteBatch(batch)}
+                            onClick={() => setConfirmDeleteBatchModal(batch)}
                             title="Excluir lote"
-                            className="h-9 w-9 flex items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-all shrink-0"
+                            className="h-9 w-9 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/10 transition-all shrink-0"
                           >
                             <Trash2 size={15} />
                           </button>
@@ -8572,6 +8586,45 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         </div>
       )}
 
+      {confirmDeleteBatchModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
+          onClick={() => !deletingBatch && setConfirmDeleteBatchModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mb-5">
+              <Trash2 className="h-8 w-8" />
+            </div>
+            <h4 className="text-white font-bold text-lg mb-2">
+              Excluir o lote "{confirmDeleteBatchModal.nome}"?
+            </h4>
+            <p className="text-zinc-500 text-sm mb-6">
+              Esta ação é permanente. O lote será removido do banco de dados. Ingressos já emitidos não serão excluídos.
+            </p>
+            <div className="flex gap-3 w-full">
+              <Button
+                variant="outline"
+                className="flex-1 h-11"
+                disabled={deletingBatch}
+                onClick={() => setConfirmDeleteBatchModal(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 h-11 border-none bg-red-500 hover:bg-red-600 text-white"
+                isLoading={deletingBatch}
+                onClick={handleDeleteBatch}
+              >
+                Excluir
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Outros Modais Existentes (Scanner, Detalhes, Dashboard, Excluir) */}
       {scanResultModal && (
         <div
@@ -9299,68 +9352,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           );
         })()}
 
-      {/* ── MODAL: CONFIRMAR EXCLUSÃO DE LOTE ── */}
-      {confirmDeleteBatch && (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          onClick={() => !deletingBatch && setConfirmDeleteBatch(null)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200 p-7 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-red-400" />
-              </div>
-              <div>
-                <h3 className="text-white font-bold text-base">Excluir Lote</h3>
-                <p className="text-zinc-500 text-xs mt-0.5">Esta ação não pode ser desfeita</p>
-              </div>
-            </div>
-            <p className="text-zinc-400 text-sm leading-relaxed">
-              Tem certeza que deseja excluir o lote{" "}
-              <span className="text-white font-semibold">"{confirmDeleteBatch.nome}"</span>?
-              {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length > 0 && (
-                <span className="block mt-2 text-amber-400 text-xs font-semibold">
-                  ⚠ Atenção: existem{" "}
-                  {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length}{" "}
-                  ingresso(s) vinculado(s) a este lote.
-                </span>
-              )}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setConfirmDeleteBatch(null)}
-                disabled={deletingBatch}
-                className="flex-1 h-11 rounded-xl border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={async () => {
-                  setDeletingBatch(true);
-                  try {
-                    await deleteDoc(doc(db, "lotes", confirmDeleteBatch.id));
-                    setBatches((prev) => prev.filter((b) => b.id !== confirmDeleteBatch.id));
-                    setConfirmDeleteBatch(null);
-                    showToast("Lote excluído com sucesso.", "success");
-                  } catch {
-                    showToast("Erro ao excluir lote.");
-                  }
-                  setDeletingBatch(false);
-                }}
-                disabled={deletingBatch}
-                className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {deletingBatch && <Loader2 className="h-4 w-4 animate-spin" />}
-                Excluir
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {toast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
           <AlertCircle className="h-5 w-5" />
@@ -9370,3 +9361,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     </div>
   );
 }
+
+export const Route = createFileRoute("/dashboard-de-admin")({
+  component: DashboardAdmin,
+});
