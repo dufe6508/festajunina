@@ -559,6 +559,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   useEffect(() => {
     if (activeTab === "admin_batches") {
       fetchBatches();
+      // Também busca os ingressos para calcular quantos já foram
+      // vendidos em cada lote (barra de progresso)
+      fetchAllTicketsForAdmin();
     } else {
       fetchAllTicketsForAdmin();
     }
@@ -4223,7 +4226,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {batches.map((batch) => (
+                  {batches.map((batch) => {
+                    // Quantidade de ingressos já emitidos/vendidos para este lote
+                    // (vinculação é feita pelo nome do lote, salvo no campo "type"
+                    // de cada ingresso no momento da criação)
+                    const vendidos = allTickets.filter(
+                      (t) => t.type === batch.nome
+                    ).length;
+                    const totalLote = Number(batch.quantidade) || 0;
+                    const restantes = Math.max(totalLote - vendidos, 0);
+                    const pctVendido =
+                      totalLote > 0
+                        ? Math.min((vendidos / totalLote) * 100, 100)
+                        : 0;
+                    const esgotado = totalLote > 0 && vendidos >= totalLote;
+                    const corBarra = esgotado
+                      ? "bg-red-500"
+                      : pctVendido >= 80
+                      ? "bg-amber-400"
+                      : "bg-white";
+
+                    return (
                     <div
                       key={batch.id}
                       className={`group relative flex flex-col rounded-2xl border transition-all duration-200 overflow-hidden ${
@@ -4263,6 +4286,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               >
                                 {batch.visivel ? "Visível" : "Oculto"}
                               </span>
+                              {esgotado && (
+                                <>
+                                  <span className="text-zinc-700">•</span>
+                                  <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
+                                    Esgotado
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -4278,9 +4309,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
                         {/* Pills de info */}
                         <div className="flex flex-wrap gap-1.5">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
-                            <Ticket className="w-3 h-3" /> {batch.quantidade}{" "}
-                            ingressos
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium ${
+                              esgotado
+                                ? "bg-red-500/10 border-red-500/30 text-red-400"
+                                : "bg-zinc-900 border-zinc-800 text-zinc-400"
+                            }`}
+                          >
+                            <Ticket className="w-3 h-3" /> {vendidos}/
+                            {totalLote} ingressos
                           </span>
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
                             <User className="w-3 h-3" />{" "}
@@ -4303,6 +4340,28 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               {formatDate(batch.dataLimite)}
                             </span>
                           )}
+                        </div>
+
+                        {/* Barra de progresso: ingressos vendidos vs disponíveis */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                              {vendidos} vendido{vendidos !== 1 ? "s" : ""}
+                            </span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                              {esgotado
+                                ? "0 restantes"
+                                : `${restantes} restante${
+                                    restantes !== 1 ? "s" : ""
+                                  }`}
+                            </span>
+                          </div>
+                          <div className="w-full bg-zinc-900 h-2 rounded-full overflow-hidden border border-zinc-800/80">
+                            <div
+                              className={`${corBarra} h-full rounded-full transition-all duration-700`}
+                              style={{ width: `${pctVendido}%` }}
+                            />
+                          </div>
                         </div>
 
                         {/* Ações */}
@@ -4333,7 +4392,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
