@@ -747,9 +747,22 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         const { ano, turma, dataStartRow } = schoolFormat;
         for (let i = dataStartRow; i < raw.length; i++) {
           const row = raw[i] || [];
-          const nome = String(row[2] ?? row[1] ?? "").trim();
+          // Nome deve vir exclusivamente da coluna 2 (col "Nome" do
+          // cabeçalho institucional). A coluna 1 é a célula em branco
+          // entre "Nº" e "Nome" — usá-la como fallback fazia "lixo"
+          // residual dessa célula (espaços não-quebráveis, fórmulas
+          // vazias, etc.) virar um "nome" fantasma e gerar linhas
+          // inválidas na pré-visualização.
+          const nome = String(row[2] ?? "")
+            .replace(/[\u00A0\u200B]/g, " ") // normaliza espaços especiais (nbsp, zero-width)
+            .trim();
           const cpf = String(row[3] ?? "").trim();
-          if (!nome) continue; // pula linhas vazias da numeração residual
+          const numero = String(row[0] ?? "").trim();
+          // Pula linhas sem nome real OU linhas "fantasma" (sem número
+          // de matrícula e sem CPF) — sobras de formatação no fim da
+          // planilha que não correspondem a um aluno de fato.
+          if (!nome) continue;
+          if (!numero && !cpf) continue;
           allRows.push({
             nome,
             ano,
