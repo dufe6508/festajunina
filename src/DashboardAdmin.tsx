@@ -918,14 +918,38 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         console.warn("Erro ao buscar CPFs para verificação de duplicatas:", e);
       }
 
+      // Detecta CPFs duplicados DENTRO da própria planilha (duas ou mais
+      // linhas do mesmo arquivo com o mesmo CPF). Sem isso, alunos repetidos
+      // no arquivo passavam direto sem nenhum aviso.
+      const cpfCountNoArquivo = new Map<string, number>();
+      normalized.forEach((r) => {
+        if (r.cpf && r.cpf.length === 11) {
+          cpfCountNoArquivo.set(r.cpf, (cpfCountNoArquivo.get(r.cpf) || 0) + 1);
+        }
+      });
+
       normalized.forEach((r) => {
         const { blockingError, cpfWarning } = validateRow(r, r._row);
-        if (blockingError) blockingErrors.push(blockingError);
-        else if (cpfWarning) cpfWarnings.push(cpfWarning);
-        else if (r.cpf && cpfsExistentesPreview.has(r.cpf))
+        const label = `${r.nome} (${r.ano}º ${r.turma})`;
+        if (blockingError) {
+          blockingErrors.push(blockingError);
+          return;
+        }
+        if (cpfWarning) {
+          // CPF com formato inválido (não tem 11 dígitos)
+          cpfWarnings.push(`${cpfWarning} (CPF inválido)`);
+          return;
+        }
+        if (r.cpf && cpfsExistentesPreview.has(r.cpf)) {
+          cpfWarnings.push(`${label}: CPF duplicado — já existe no sistema`);
+          return;
+        }
+        if (r.cpf && (cpfCountNoArquivo.get(r.cpf) || 0) > 1) {
           cpfWarnings.push(
-            `${r.nome} (${r.ano}º ${r.turma}): CPF duplicado — já existe no sistema`
+            `${label}: CPF duplicado — repetido ${cpfCountNoArquivo.get(r.cpf)}x na planilha`
           );
+          return;
+        }
       });
       setImportErrors(blockingErrors);
       setImportCpfWarnings(cpfWarnings);
@@ -944,11 +968,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setImportResult(null);
 
     try {
-      // Alunos listados nos avisos (CPF inválido ou duplicado) são importados sem CPF
+      // Alunos listados nos avisos (CPF inválido ou duplicado) são importados
+      // sem CPF — guardamos quais para também contabilizá-los como
+      // "duplicatas/CPF irregular" no resultado final, em vez de sumirem
+      // misturados no contador de sucesso.
       const warnSet = new Set(importCpfWarnings.map((w) => w.split(":")[0].trim()));
       const normalized = importPreview.map((r) => {
         const label = `${r.nome} (${r.ano}º ${r.turma})`;
-        return warnSet.has(label) ? { ...r, cpf: "" } : r;
+        return warnSet.has(label)
+          ? { ...r, cpf: "", _cpfIrregular: true }
+          : { ...r, _cpfIrregular: false };
       });
 
       let success = 0,
@@ -1011,7 +1040,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             cadastradoEm: new Date().toISOString(),
           });
           if (row.cpf) cpfsExistentes.add(row.cpf);
-          success++;
+          // Alunos com CPF inválido/duplicado que entraram sem CPF contam
+          // como "duplicatas/CPF irregular", não como sucesso pleno —
+          // assim o contador no resumo reflete a realidade e o admin sabe
+          // quantos alunos precisam de revisão manual de CPF.
+          if (row._cpfIrregular) duplicates++;
+          else success++;
         } catch (e) {
           console.error("Erro ao salvar aluno:", row, e);
           failed++;
@@ -1019,8 +1053,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
 
       setImportResult({ success, failed, duplicates });
-      if (success > 0) {
-        showToast(`${success} aluno(s) importado(s) com sucesso!`, "success");
+      if (success > 0 || duplicates > 0) {
+        const extra =
+          duplicates > 0
+            ? ` (${duplicates} sem CPF por inconsistência — revise manualmente)`
+            : "";
+        showToast(
+          `${success + duplicates} aluno(s) importado(s) com sucesso!${extra}`,
+          "success"
+        );
       } else {
         showToast(
           "Nenhum aluno foi importado. Verifique os dados e as permissões do Firebase.",
@@ -4944,56 +4985,65 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {rowsToShow.map((row, i) => {
-                                      const { blockingError, cpfWarning } = validateRow(row, row._row);
-                                      const err = blockingError;
-                                      const warnCpf = cpfWarning;
-                                      return (
-                                        <tr
-                                          key={i}
-                                          className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
-                                            err ? "bg-red-500/5" : warnCpf ? "bg-yellow-500/5" : ""
-                                          }`}
-                                        >
-                                          <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
-                                            {i + 1}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                            {row.ano || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                            {row.turma || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
-                                            {row.nome || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-xs border-l border-zinc-800/40 tabular-nums">
-                                            {warnCpf ? (
-                                              <span className="text-yellow-400/80 line-through">
-                                                {row.cpf
-                                                  ? `${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`
-                                                  : "—"}
-                                              </span>
-                                            ) : row.cpf ? (
-                                              <span className="text-zinc-500">
-                                                {`${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`}
-                                              </span>
-                                            ) : (
-                                              <span className="text-zinc-700">—</span>
-                                            )}
-                                          </td>
-                                          <td className="px-3 py-3 border-l border-zinc-800/40">
-                                            {err ? (
-                                              <XCircle className="h-3.5 w-3.5 text-red-400/70" />
-                                            ) : warnCpf ? (
-                                              <AlertTriangle className="h-3.5 w-3.5 text-yellow-400/80" />
-                                            ) : (
-                                              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                                            )}
-                                          </td>
-                                        </tr>
+                                    {(() => {
+                                      // Mesmo conjunto de labels usado na lista de avisos
+                                      // (CPF inválido OU duplicado), para que a tabela
+                                      // destaque exatamente os mesmos alunos problemáticos.
+                                      const warnLabelSet = new Set(
+                                        importCpfWarnings.map((w) => w.split(":")[0].trim())
                                       );
-                                    })}
+                                      return rowsToShow.map((row, i) => {
+                                        const { blockingError } = validateRow(row, row._row);
+                                        const err = blockingError;
+                                        const label = `${row.nome} (${row.ano}º ${row.turma})`;
+                                        const warnCpf = !err && warnLabelSet.has(label);
+                                        return (
+                                          <tr
+                                            key={i}
+                                            className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                              err ? "bg-red-500/5" : warnCpf ? "bg-yellow-500/5" : ""
+                                            }`}
+                                          >
+                                            <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
+                                              {i + 1}
+                                            </td>
+                                            <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                              {row.ano || "—"}
+                                            </td>
+                                            <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                              {row.turma || "—"}
+                                            </td>
+                                            <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                              {row.nome || "—"}
+                                            </td>
+                                            <td className="px-4 py-3 font-mono text-xs border-l border-zinc-800/40 tabular-nums">
+                                              {warnCpf ? (
+                                                <span className="text-yellow-400/80 line-through">
+                                                  {row.cpf
+                                                    ? `${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`
+                                                    : "—"}
+                                                </span>
+                                              ) : row.cpf ? (
+                                                <span className="text-zinc-500">
+                                                  {`${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`}
+                                                </span>
+                                              ) : (
+                                                <span className="text-zinc-700">—</span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-3 border-l border-zinc-800/40">
+                                              {err ? (
+                                                <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                              ) : warnCpf ? (
+                                                <AlertTriangle className="h-3.5 w-3.5 text-yellow-400/80" />
+                                              ) : (
+                                                <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      });
+                                    })()}
                                   </tbody>
                                 </table>
                               </div>
@@ -5027,13 +5077,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         </div>
                       )}
 
-                      {/* Avisos de CPF inválido (não bloqueantes) */}
+                      {/* Avisos de CPF inválido ou duplicado (não bloqueantes) */}
                       {importCpfWarnings.length > 0 && importErrors.length === 0 && (
                         <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
                           <div className="flex items-center gap-2 mb-3">
                             <AlertTriangle className="h-4 w-4 text-yellow-400" />
                             <p className="text-sm font-bold text-yellow-400">
-                              {importCpfWarnings.length} aluno(s) com CPF inválido
+                              {importCpfWarnings.length} aluno(s) com CPF inválido ou duplicado
                             </p>
                           </div>
                           <ul className="space-y-1 max-h-32 overflow-y-auto">
@@ -5075,11 +5125,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               </p>
                             </div>
                             <div className="p-4 text-center">
-                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
+                              <p className="text-2xl font-black text-yellow-400 tabular-nums">
                                 {importResult.duplicates}
                               </p>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
-                                Duplicatas
+                                Sem CPF (duplicado/inválido)
                               </p>
                             </div>
                             <div className="p-4 text-center">
@@ -5091,6 +5141,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               </p>
                             </div>
                           </div>
+                          {importResult.duplicates > 0 && (
+                            <p className="text-xs text-yellow-400/80 mt-3">
+                              {importResult.duplicates} aluno{importResult.duplicates !== 1 ? "s" : ""} {importResult.duplicates !== 1 ? "foram cadastrados" : "foi cadastrado"} sem CPF por causa de CPF inválido ou duplicado. Revise e complete o CPF manualmente pelo perfil de cada aluno.
+                            </p>
+                          )}
                           <button
                             onClick={() => {
                               setImportFiles([]);
