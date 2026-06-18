@@ -117,17 +117,21 @@ const findUserIdByCpf = async (db, cpfDigits) => {
   }
 };
 
-// Gera um código único de ingresso em ordem sequencial: FJ-0001, FJ-0002...
+// Gera um código único buscando o menor número disponível.
+// Lê todos os ingressos existentes, monta o conjunto de números já usados
+// e retorna o primeiro inteiro >= 1 que ainda não esteja ocupado.
+// Assim, ao apagar FJ-0003, o próximo criado recebe FJ-0003.
 const generateTicketCode = async (db) => {
-  const counterRef = doc(db, "config", "ticketCounter");
-  const novoNumero = await runTransaction(db, async (transaction) => {
-    const snap = await transaction.get(counterRef);
-    const atual = snap.exists() ? snap.data().ultimo : 0;
-    const proximo = atual + 1;
-    transaction.set(counterRef, { ultimo: proximo });
-    return proximo;
+  const ingressosSnap = await getDocs(collection(db, "ingressos"));
+  const usados = new Set();
+  ingressosSnap.forEach((d) => {
+    const code = d.data().code || "";
+    const m = code.match(/^(?:#?FJ-?)(\d+)$/i);
+    if (m) usados.add(parseInt(m[1], 10));
   });
-  return `FJ-${String(novoNumero).padStart(4, "0")}`;
+  let n = 1;
+  while (usados.has(n)) n++;
+  return `FJ-${String(n).padStart(4, "0")}`;
 };
 
 // Nova formatação de data para seguir o padrão visual: "14/06/2026 às 01:44"
@@ -2400,13 +2404,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const excluirIngresso = async (ticketId) => {
     setAdminLoading(true);
     try {
-      const counterRef = doc(db, "config", "ticketCounter");
-      await runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(counterRef);
-        const atual = snap.exists() ? snap.data().ultimo : 0;
-        if (atual > 0) transaction.set(counterRef, { ultimo: atual - 1 });
-        transaction.delete(doc(db, "ingressos", ticketId));
-      });
+      await deleteDoc(doc(db, "ingressos", ticketId));
+      // O contador não é mais usado: generateTicketCode lê os ingressos
+      // existentes e preenche o menor número vago automaticamente.
       setAllTickets((prev) => prev.filter((t) => t.id !== ticketId));
       showToast("Ingresso excluído com sucesso!", "success");
       setConfirmDeleteTicket(null);
@@ -8259,6 +8259,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               </div>
 
               {/* ── Visibilidade por Turma ── */}
+              {(batchModal.publico || "Ambos") !== "Pais/Responsáveis" && (
               <div className="border border-zinc-800 rounded-xl overflow-hidden">
                 {/* Cabeçalho colapsável */}
                 <button
@@ -8495,6 +8496,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   </div>
                 )}
               </div>
+              )}
               <div className="pt-4 flex gap-3">
                 <Button
                   type="button"
