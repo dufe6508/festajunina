@@ -38,6 +38,8 @@ import {
   Info,
   Pencil,
   Unlink,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
 import {
@@ -287,6 +289,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
+  const [confirmBlockModal, setConfirmBlockModal] = useState(null); // Bloquear/Desbloquear lote
 
   // Estados: Busca de aluno no formulário de adicionar ingresso
   const [addTicketStudentSearch, setAddTicketStudentSearch] = useState("");
@@ -2222,6 +2225,35 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       setConfirmVisibilityModal(null);
     } catch (error) {
       showToast("Erro ao alterar a visibilidade.");
+    }
+    setLoadingBatches(false);
+  };
+
+  // Bloqueia ou desbloqueia a compra/ingresso de um lote. Quando bloqueado,
+  // o aluno não consegue adquirir ingressos desse lote e o app/tela de compra
+  // deve exibir a mensagem de que o lote está bloqueado (campo "bloqueado"
+  // no documento do lote em "lotes").
+  const handleToggleBlock = async () => {
+    if (!confirmBlockModal) return;
+    setLoadingBatches(true);
+    try {
+      const batch = confirmBlockModal;
+      const novoStatus = !batch.bloqueado;
+      await updateDoc(doc(db, "lotes", batch.id), { bloqueado: novoStatus });
+      setBatches((prev) =>
+        prev.map((b) =>
+          b.id === batch.id ? { ...b, bloqueado: novoStatus } : b
+        )
+      );
+      showToast(
+        novoStatus
+          ? "Lote bloqueado. O ingresso não poderá ser adquirido."
+          : "Lote desbloqueado com sucesso.",
+        "success"
+      );
+      setConfirmBlockModal(null);
+    } catch (error) {
+      showToast("Erro ao alterar o bloqueio do lote.");
     }
     setLoadingBatches(false);
   };
@@ -4250,7 +4282,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     <div
                       key={batch.id}
                       className={`group relative flex flex-col rounded-2xl border transition-all duration-200 overflow-hidden ${
-                        batch.visivel
+                        batch.bloqueado
+                          ? "bg-[#0a0a0a] border-amber-500/30 hover:border-amber-500/50"
+                          : batch.visivel
                           ? "bg-[#0a0a0a] border-zinc-800 hover:border-zinc-600"
                           : "bg-[#0a0a0a] border-zinc-800/50 opacity-60 hover:opacity-80 hover:border-zinc-700"
                       }`}
@@ -4258,7 +4292,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       {/* Topo colorido sutil */}
                       <div
                         className={`h-0.5 w-full ${
-                          batch.visivel
+                          batch.bloqueado
+                            ? "bg-amber-500/50"
+                            : batch.visivel
                             ? "bg-gradient-to-r from-white/20 to-transparent"
                             : "bg-zinc-800"
                         }`}
@@ -4291,6 +4327,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                   <span className="text-zinc-700">•</span>
                                   <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
                                     Esgotado
+                                  </span>
+                                </>
+                              )}
+                              {batch.bloqueado && (
+                                <>
+                                  <span className="text-zinc-700">•</span>
+                                  <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                                    Bloqueado
                                   </span>
                                 </>
                               )}
@@ -4371,6 +4415,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             className="flex-1 h-9 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 text-xs font-semibold hover:bg-zinc-800 hover:text-white hover:border-zinc-700 transition-all"
                           >
                             Editar
+                          </button>
+                          <button
+                            onClick={() => setConfirmBlockModal(batch)}
+                            title={
+                              batch.bloqueado
+                                ? "Desbloquear lote"
+                                : "Bloquear lote"
+                            }
+                            className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-all shrink-0 ${
+                              batch.bloqueado
+                                ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:text-amber-300 hover:border-amber-500/60"
+                                : "border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-white hover:border-zinc-600"
+                            }`}
+                          >
+                            {batch.bloqueado ? (
+                              <Lock size={15} />
+                            ) : (
+                              <Unlock size={15} />
+                            )}
                           </button>
                           <button
                             onClick={() => setConfirmVisibilityModal(batch)}
@@ -8185,6 +8248,57 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 }`}
                 isLoading={loadingBatches}
                 onClick={handleToggleVisibility}
+              >
+                Confirmar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Bloqueio do Lote */}
+      {confirmBlockModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
+          onClick={() => setConfirmBlockModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center justify-center mb-5">
+              {confirmBlockModal.bloqueado ? (
+                <Unlock className="h-8 w-8 text-white" />
+              ) : (
+                <Lock className="h-8 w-8 text-amber-400" />
+              )}
+            </div>
+            <h4 className="text-white font-bold text-lg mb-2">
+              {confirmBlockModal.bloqueado
+                ? "Deseja desbloquear este lote?"
+                : "Deseja bloquear este lote?"}
+            </h4>
+            <p className="text-zinc-500 text-sm mb-6">
+              {confirmBlockModal.bloqueado
+                ? "Os alunos voltarão a conseguir adquirir ingressos deste lote normalmente."
+                : "Os alunos não conseguirão mais adquirir ingressos deste lote. Será exibida uma mensagem informando que o lote está bloqueado."}
+            </p>
+            <div className="flex gap-3 w-full">
+              <Button
+                variant="outline"
+                className="flex-1 h-11"
+                onClick={() => setConfirmBlockModal(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className={`flex-1 h-11 border-none ${
+                  confirmBlockModal.bloqueado
+                    ? "bg-white hover:bg-zinc-200 text-black"
+                    : "bg-amber-500 hover:bg-amber-600 text-black"
+                }`}
+                isLoading={loadingBatches}
+                onClick={handleToggleBlock}
               >
                 Confirmar
               </Button>
