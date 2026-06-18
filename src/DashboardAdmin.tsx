@@ -290,8 +290,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
-  const [confirmDeleteBatchModal, setConfirmDeleteBatchModal] = useState(null); // Excluir lote
-  const [deletingBatch, setDeletingBatch] = useState(false);
 
   // Estados: Busca de aluno no formulário de adicionar ingresso
   const [addTicketStudentSearch, setAddTicketStudentSearch] = useState("");
@@ -2228,21 +2226,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setLoadingBatches(false);
   };
 
-  const handleDeleteBatch = async () => {
-    if (!confirmDeleteBatchModal) return;
-    setDeletingBatch(true);
-    try {
-      const batch = confirmDeleteBatchModal;
-      await deleteDoc(doc(db, "lotes", batch.id));
-      setBatches((prev) => prev.filter((b) => b.id !== batch.id));
-      showToast("Lote excluído com sucesso.", "success");
-      setConfirmDeleteBatchModal(null);
-    } catch (error) {
-      showToast("Erro ao excluir o lote.");
-    }
-    setDeletingBatch(false);
-  };
-
   // DashboardAdmin.tsx — linha 1230
   const processScan = (code) => {
     // Remove o '#' inicial se vier do input manual ou de um QR que contenha '#'
@@ -3109,13 +3092,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <StatCard
                   title="Entraram"
                   val={allTickets.filter((t) => t.usado).length}
-                  tot={allTickets.filter((t) => t.pagamentoConfirmado).length}
+                  tot={allTickets.length}
                   icon={CheckSquare}
                   pct={
-                    allTickets.filter((t) => t.pagamentoConfirmado).length > 0
+                    allTickets.length > 0
                       ? (allTickets.filter((t) => t.usado).length /
-                          allTickets.filter((t) => t.pagamentoConfirmado)
-                            .length) *
+                          allTickets.length) *
                         100
                       : 0
                   }
@@ -4430,15 +4412,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             ) : (
                               <AiOutlineEyeInvisible size={15} />
                             )}
-                          </button>
-                          <button
-                            onClick={() =>
-                              setConfirmDeleteBatchModal({ ...batch, vendidos })
-                            }
-                            title="Excluir lote"
-                            className="h-9 w-9 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/10 transition-all shrink-0"
-                          >
-                            <Trash2 size={15} />
                           </button>
 
                         </div>
@@ -8239,55 +8212,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 onClick={handleToggleVisibility}
               >
                 Confirmar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Exclusão do Lote */}
-      {confirmDeleteBatchModal && (
-        <div
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
-          onClick={() => setConfirmDeleteBatchModal(null)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mb-5">
-              <Trash2 className="h-7 w-7" />
-            </div>
-            <h4 className="text-white font-bold text-lg mb-2">
-              Excluir "{confirmDeleteBatchModal.nome}"?
-            </h4>
-            <p className="text-zinc-500 text-sm mb-3">
-              Esta ação não pode ser desfeita. O lote deixará de existir e não
-              poderá mais ser selecionado para novos ingressos.
-            </p>
-            {confirmDeleteBatchModal.vendidos > 0 && (
-              <p className="text-amber-400 text-xs bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2.5 mb-3">
-                Atenção: {confirmDeleteBatchModal.vendidos} ingresso
-                {confirmDeleteBatchModal.vendidos !== 1 ? "s" : ""} já
-                vendido{confirmDeleteBatchModal.vendidos !== 1 ? "s" : ""}{" "}
-                neste lote. Os ingressos já emitidos não serão afetados, mas o
-                lote sairá da lista de gestão.
-              </p>
-            )}
-            <div className="flex gap-3 w-full mt-3">
-              <Button
-                variant="outline"
-                className="flex-1 h-11"
-                onClick={() => setConfirmDeleteBatchModal(null)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                className="flex-1 h-11 border-none bg-red-500 hover:bg-red-600 text-white"
-                isLoading={deletingBatch}
-                onClick={handleDeleteBatch}
-              >
-                Excluir
               </Button>
             </div>
           </div>
