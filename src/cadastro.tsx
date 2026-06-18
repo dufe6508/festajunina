@@ -2547,36 +2547,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                                   .replace(".", ",")}
                               </p>
 
-                              {limite > 0 && (
-                                <div className="mt-4 space-y-1.5 max-w-sm">
-                                  <div className="flex justify-between text-[11px]">
-                                    <span className="text-zinc-400 font-medium">
-                                      {esgotado
-                                        ? "Lote esgotado"
-                                        : `${restantes} ${
-                                            restantes === 1 ? "restante" : "restantes"
-                                          }`}
-                                    </span>
-                                    <span className="text-zinc-500 tabular-nums">
-                                      {vendidos}/{limite}
-                                    </span>
-                                  </div>
-                                  <div className="h-2 w-full rounded-full bg-zinc-900 overflow-hidden border border-zinc-800">
-                                    <div
-                                      className={`h-full transition-all duration-500 ${
-                                        esgotado
-                                          ? "bg-red-500"
-                                          : pct >= 80
-                                          ? "bg-amber-400"
-                                          : "bg-green-500"
-                                      }`}
-                                      style={{ width: `${pct}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                              {purchasedTickets.length > 0 && (
+                               {purchasedTickets.length > 0 && (
                                 <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
                                   <CheckCircle2 className="h-5 w-5 shrink-0" />
                                   Você já garantiu sua entrada. Limite de 1
