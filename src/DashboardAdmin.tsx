@@ -330,9 +330,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   } | null>(null);
   const [importDragActive, setImportDragActive] = useState(false);
   const [importTypeErrors, setImportTypeErrors] = useState<string[]>([]);
-  const [importPreviewTurmaTab, setImportPreviewTurmaTab] = useState<
-    string | null
-  >(null);
+  const [importCpfWarnings, setImportCpfWarnings] = useState<string[]>([]);
+  const [importConfirmModal, setImportConfirmModal] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
 
   // Estados: Importação de Pais/Responsáveis
@@ -810,23 +809,35 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     return { nome: nome.trim(), turma: turma.trim(), ano: ano.trim(), cpf };
   };
 
-  // Valida uma linha normalizada
-  // CPF é opcional: se vier vazio, o aluno é importado sem CPF (a escola
-  // pode completar depois pelo modal do aluno). Se vier preenchido mas
-  // com formato inválido, ainda bloqueia a importação dessa linha.
+  // Valida uma linha normalizada.
+  // Retorna { blockingError, cpfWarning }:
+  //   blockingError → impede a importação (nome/ano/turma inválidos)
+  //   cpfWarning    → CPF presente mas inválido; o aluno será importado sem CPF
   const validateRow = (
     r: { nome: string; turma: string; ano: string; cpf: string },
     rowNum: number
-  ): string | null => {
+  ): { blockingError: string | null; cpfWarning: string | null } => {
     if (!r.nome || r.nome.length < 3)
-      return `Linha ${rowNum}: Nome inválido ("${r.nome}")`;
+      return {
+        blockingError: `Linha ${rowNum}: Nome inválido ("${r.nome}")`,
+        cpfWarning: null,
+      };
     if (!["1", "2", "3"].includes(r.ano))
-      return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
+      return {
+        blockingError: `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`,
+        cpfWarning: null,
+      };
     if (!/^[A-L]$/.test(r.turma))
-      return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
+      return {
+        blockingError: `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`,
+        cpfWarning: null,
+      };
     if (r.cpf && r.cpf.length !== 11)
-      return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
-    return null;
+      return {
+        blockingError: null,
+        cpfWarning: `${r.nome} (${r.ano}º ${r.turma}): CPF inválido — ${r.cpf.length} dígito${r.cpf.length !== 1 ? "s" : ""} encontrado${r.cpf.length !== 1 ? "s" : ""}`,
+      };
+    return { blockingError: null, cpfWarning: null };
   };
 
   // Tipos de arquivo permitidos
@@ -844,7 +855,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setImportErrors([]);
     setImportPreview([]);
     setImportTypeErrors([]);
-    setImportPreviewTurmaTab(null);
+                            setImportCpfWarnings([]);
+    setImportCpfWarnings([]);
 
     // Separar válidos e inválidos por tipo
     const invalid = fileArray.filter((f) => !isAllowedFile(f));
@@ -883,12 +895,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         ...normalizeRow(r),
         _row: r._row,
       }));
-      const errors: string[] = [];
+      const blockingErrors: string[] = [];
+      const cpfWarnings: string[] = [];
       normalized.forEach((r) => {
-        const err = validateRow(r, r._row);
-        if (err) errors.push(err);
+        const { blockingError, cpfWarning } = validateRow(r, r._row);
+        if (blockingError) blockingErrors.push(blockingError);
+        if (cpfWarning) cpfWarnings.push(cpfWarning);
       });
-      setImportErrors(errors);
+      setImportErrors(blockingErrors);
+      setImportCpfWarnings(cpfWarnings);
       setImportPreview(normalized);
     } catch (err) {
       setImportErrors([
@@ -899,12 +914,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
   const handleImportSubmit = async () => {
     if (importPreview.length === 0 || importErrors.length > 0) return;
+    setImportConfirmModal(false);
     setImportLoading(true);
     setImportResult(null);
 
     try {
-      // Usa o preview já normalizado e validado — não faz novo parse
-      const normalized = importPreview;
+      // Usa o preview já normalizado — CPFs inválidos são descartados aqui
+      const normalized = importPreview.map((r) => {
+        const { cpfWarning } = validateRow(r, r._row);
+        // Se há aviso de CPF, sobe o aluno sem CPF
+        return cpfWarning ? { ...r, cpf: "" } : r;
+      });
 
       let success = 0,
         failed = 0,
@@ -930,8 +950,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
 
       for (const row of normalized) {
-        const err = validateRow(row, row._row);
-        if (err) {
+        const { blockingError } = validateRow(row, row._row);
+        if (blockingError) {
           failed++;
           continue;
         }
@@ -4563,6 +4583,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             setImportErrors([]);
                             setImportResult(null);
                             setImportTypeErrors([]);
+                            setImportCpfWarnings([]);
                           }
                         }}
                         className={`flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-bold transition-all ${
@@ -4666,7 +4687,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           accept=".csv,.xlsx"
                           multiple
                           className="hidden"
-                          onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             if (e.target.files && e.target.files.length > 0)
                               handleImportFilesChange(e.target.files);
@@ -4716,7 +4736,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                 setImportErrors([]);
                                 setImportResult(null);
                                 setImportTypeErrors([]);
-                                setImportPreviewTurmaTab(null);
+                            setImportCpfWarnings([]);
                               }}
                               className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
                             >
@@ -4778,178 +4798,111 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       )}
 
                       {/* Preview dos dados */}
-                      {importPreview.length > 0 &&
-                        (() => {
-                          // Agrupa as linhas por turma (ano + turma) para
-                          // exibir em sub-abas em vez de uma lista única
-                          const groupsMap = new Map<
-                            string,
-                            { ano: string; turma: string; rows: typeof importPreview }
-                          >();
-                          importPreview.forEach((row) => {
-                            const ano = row.ano || "—";
-                            const turma = row.turma || "—";
-                            const key = `${ano}|${turma}`;
-                            if (!groupsMap.has(key)) {
-                              groupsMap.set(key, { ano, turma, rows: [] });
-                            }
-                            groupsMap.get(key)!.rows.push(row);
-                          });
-                          const groups = Array.from(groupsMap.entries())
-                            .map(([key, g]) => ({ key, ...g }))
-                            .sort((a, b) => a.key.localeCompare(b.key));
-                          const distinctAnos = new Set(groups.map((g) => g.ano))
-                            .size;
-                          const activeKey =
-                            importPreviewTurmaTab &&
-                            groups.some((g) => g.key === importPreviewTurmaTab)
-                              ? importPreviewTurmaTab
-                              : groups[0]?.key;
-                          const activeGroup =
-                            groups.find((g) => g.key === activeKey) || groups[0];
-                          const rowsToShow = activeGroup
-                            ? activeGroup.rows
-                            : importPreview;
-
-                          return (
-                            <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
-                              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-                                <p className="text-sm font-bold text-white">
-                                  Pré-visualização
-                                </p>
-                                <span className="text-xs text-zinc-500">
-                                  {importPreview.length} registros
-                                </span>
-                              </div>
-
-                              {/* Sub-abas por turma — só aparecem quando há mais de uma turma */}
-                              {groups.length > 1 && (
-                                <div className="flex items-center gap-1.5 px-5 py-3 border-b border-zinc-800 overflow-x-auto">
-                                  {groups.map((g) => {
-                                    const isActive = g.key === activeKey;
-                                    const label =
-                                      distinctAnos > 1
-                                        ? `${g.ano}º${g.turma}`
-                                        : g.turma;
-                                    return (
-                                      <button
-                                        key={g.key}
-                                        onClick={() =>
-                                          setImportPreviewTurmaTab(g.key)
-                                        }
-                                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                          isActive
-                                            ? "bg-white text-black"
-                                            : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
-                                        }`}
-                                      >
-                                        {label}
-                                        <span
-                                          className={`ml-1.5 ${
-                                            isActive
-                                              ? "text-zinc-500"
-                                              : "text-zinc-600"
-                                          }`}
-                                        >
-                                          {g.rows.length}
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-
-                              <div
-                                className="overflow-y-auto"
-                                style={{
-                                  maxHeight: "480px",
-                                  scrollbarWidth: "thin",
-                                  scrollbarColor: "#3f3f46 transparent",
-                                }}
-                              >
-                                <table className="w-full text-sm border-collapse">
-                                  <colgroup>
-                                    <col style={{ width: "40px" }} />
-                                    <col style={{ width: "64px" }} />
-                                    <col style={{ width: "80px" }} />
-                                    <col />
-                                    <col style={{ width: "160px" }} />
-                                    <col style={{ width: "44px" }} />
-                                  </colgroup>
-                                  <thead className="sticky top-0 bg-[#0a0a0a] z-10">
-                                    <tr className="border-b border-zinc-800">
-                                      <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                                        #
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Ano
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Turma
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Nome
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        CPF
-                                      </th>
-                                      <th className="px-3 py-3 border-l border-zinc-800/60"></th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {rowsToShow.map((row, i) => {
-                                      const err = validateRow(row, row._row);
-                                      return (
-                                        <tr
-                                          key={i}
-                                          className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
-                                            err ? "bg-red-500/5" : ""
-                                          }`}
-                                        >
-                                          <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
-                                            {i + 1}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                            {row.ano || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                            {row.turma || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
-                                            {row.nome || "—"}
-                                          </td>
-                                          <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40 tabular-nums">
+                      {importPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importPreview.length} registros
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{
+                              maxHeight: "480px",
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#3f3f46 transparent",
+                            }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <colgroup>
+                                <col style={{ width: "40px" }} />
+                                <col style={{ width: "64px" }} />
+                                <col style={{ width: "80px" }} />
+                                <col />
+                                <col style={{ width: "160px" }} />
+                                <col style={{ width: "44px" }} />
+                              </colgroup>
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="border-b border-zinc-800">
+                                  <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                    #
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Ano
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Turma
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Nome
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    CPF
+                                  </th>
+                                  <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importPreview.map((row, i) => {
+                                  const { blockingError, cpfWarning } = validateRow(row, row._row);
+                                  const err = blockingError;
+                                  const warnCpf = cpfWarning;
+                                  return (
+                                    <tr
+                                      key={i}
+                                      className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                        err ? "bg-red-500/5" : warnCpf ? "bg-yellow-500/5" : ""
+                                      }`}
+                                    >
+                                      <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
+                                        {i + 1}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.ano || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.turma || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                        {row.nome || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-xs border-l border-zinc-800/40 tabular-nums">
+                                        {warnCpf ? (
+                                          <span className="text-yellow-400/80 line-through">
                                             {row.cpf
-                                              ? `${row.cpf.slice(
-                                                  0,
-                                                  3
-                                                )}.${row.cpf.slice(
-                                                  3,
-                                                  6
-                                                )}.${row.cpf.slice(
-                                                  6,
-                                                  9
-                                                )}-${row.cpf.slice(9)}`
+                                              ? `${row.cpf.slice(0, 3)}.${row.cpf.slice(3, 6)}.${row.cpf.slice(6, 9)}-${row.cpf.slice(9)}`
                                               : "—"}
-                                          </td>
-                                          <td className="px-3 py-3 border-l border-zinc-800/40">
-                                            {err ? (
-                                              <XCircle className="h-3.5 w-3.5 text-red-400/70" />
-                                            ) : (
-                                              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                                            )}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                                          </span>
+                                        ) : row.cpf ? (
+                                          <span className="text-zinc-500">
+                                            {`${row.cpf.slice(0, 3)}.${row.cpf.slice(3, 6)}.${row.cpf.slice(6, 9)}-${row.cpf.slice(9)}`}
+                                          </span>
+                                        ) : (
+                                          <span className="text-zinc-700">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-3 border-l border-zinc-800/40">
+                                        {err ? (
+                                          <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                        ) : warnCpf ? (
+                                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-400/80" />
+                                        ) : (
+                                          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
-                      {/* Erros de validação */}
+                      {/* Erros de validação (bloqueantes) */}
                       {importErrors.length > 0 && (
                         <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
                           <div className="flex items-center gap-2 mb-3">
@@ -4971,6 +4924,31 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <p className="text-xs text-zinc-500 mt-3">
                             Corrija os erros no arquivo e reimporte para
                             continuar.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Avisos de CPF inválido (não bloqueantes) */}
+                      {importCpfWarnings.length > 0 && importErrors.length === 0 && (
+                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                            <p className="text-sm font-bold text-yellow-400">
+                              {importCpfWarnings.length} aluno(s) com CPF inválido
+                            </p>
+                          </div>
+                          <ul className="space-y-1 max-h-32 overflow-y-auto">
+                            {importCpfWarnings.map((w, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-yellow-300/80 font-mono"
+                              >
+                                {w}
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="text-xs text-zinc-500 mt-3">
+                            Estes alunos serão importados sem CPF. Você poderá inserir o CPF manualmente depois.
                           </p>
                         </div>
                       )}
@@ -5024,7 +5002,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               setImportErrors([]);
                               setImportResult(null);
                               setImportTypeErrors([]);
-                              setImportPreviewTurmaTab(null);
+                            setImportCpfWarnings([]);
                             }}
                             className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
                           >
@@ -5038,7 +5016,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         importErrors.length === 0 &&
                         !importResult && (
                           <button
-                            onClick={handleImportSubmit}
+                            onClick={() => {
+                              if (importCpfWarnings.length > 0) {
+                                setImportConfirmModal(true);
+                              } else {
+                                handleImportSubmit();
+                              }
+                            }}
                             disabled={importLoading}
                             className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
                           >
@@ -5151,7 +5135,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           accept=".csv,.xlsx"
                           multiple
                           className="hidden"
-                          onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             if (e.target.files && e.target.files.length > 0)
                               handleImportParentFilesChange(e.target.files);
@@ -9164,6 +9147,70 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             </div>
           );
         })()}
+
+      {/* ── MODAL DE CONFIRMAÇÃO: IMPORTAR COM CPF INVÁLIDO ── */}
+      {importConfirmModal && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setImportConfirmModal(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start gap-4 px-7 pt-7 pb-5">
+              <div className="w-10 h-10 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <AlertTriangle className="h-5 w-5 text-yellow-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-base">
+                  Importar alunos sem CPF?
+                </h3>
+                <p className="text-zinc-400 text-sm mt-1">
+                  {importCpfWarnings.length} aluno{importCpfWarnings.length !== 1 ? "s" : ""} com CPF inválido serão importados sem CPF. Você poderá inserir o CPF manualmente pelo perfil de cada aluno.
+                </p>
+              </div>
+            </div>
+
+            {/* Lista de alunos afetados */}
+            <div className="mx-7 mb-5 rounded-xl border border-yellow-500/20 bg-yellow-500/5 overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-yellow-500/10">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-yellow-500/70">
+                  Alunos que serão importados sem CPF
+                </p>
+              </div>
+              <ul
+                className="divide-y divide-yellow-500/10 max-h-48 overflow-y-auto"
+                style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}
+              >
+                {importCpfWarnings.map((w, i) => (
+                  <li key={i} className="px-4 py-2.5 text-xs text-yellow-300/80 font-mono">
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Ações */}
+            <div className="flex gap-3 px-7 pb-7">
+              <button
+                onClick={() => setImportConfirmModal(false)}
+                className="flex-1 h-12 rounded-2xl border border-zinc-800 bg-transparent text-zinc-400 text-sm font-semibold hover:bg-zinc-900 hover:text-white transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleImportSubmit}
+                className="flex-1 h-12 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
+              >
+                <FileUp className="h-4 w-4" />
+                Confirmar importação
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
