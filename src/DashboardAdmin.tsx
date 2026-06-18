@@ -4313,8 +4313,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       (t) => t.type === batch.nome
                     ).length;
                     const limite = Number(batch.quantidade) || 0;
-                    const pct = limite > 0 ? Math.min(100, (vendidos / limite) * 100) : 0;
-                    const esgotado = limite > 0 && vendidos >= limite;
+                    const pct = limite > 0 ? Math.min(100, (totalNaDB / limite) * 100) : 0;
+                    const esgotado = limite > 0 && totalNaDB >= limite;
                     return (
                     <div
                       key={batch.id}
@@ -4402,7 +4402,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <div className="space-y-1.5">
                             <div className="flex justify-between items-center text-[11px]">
                               <span className="text-zinc-400 font-medium">
-                                Vendidos
+                                Ingressos
                               </span>
                               <span
                                 className={`tabular-nums font-bold ${
@@ -4413,7 +4413,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     : "text-white"
                                 }`}
                               >
-                                {vendidos}/{limite}
+                                {totalNaDB}/{limite}
                                 {esgotado && " · Esgotado"}
                               </span>
                             </div>
