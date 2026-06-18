@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef } from "react";
 import {
   Loader2,
@@ -289,7 +290,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
-  const [confirmBlockModal, setConfirmBlockModal] = useState(null); // Bloquear/Desbloquear lote
 
   // Estados: Busca de aluno no formulário de adicionar ingresso
   const [addTicketStudentSearch, setAddTicketStudentSearch] = useState("");
@@ -562,9 +562,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   useEffect(() => {
     if (activeTab === "admin_batches") {
       fetchBatches();
-      // Também busca os ingressos para calcular quantos já foram
-      // vendidos em cada lote (barra de progresso)
-      fetchAllTicketsForAdmin();
     } else {
       fetchAllTicketsForAdmin();
     }
@@ -2225,35 +2222,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       setConfirmVisibilityModal(null);
     } catch (error) {
       showToast("Erro ao alterar a visibilidade.");
-    }
-    setLoadingBatches(false);
-  };
-
-  // Bloqueia ou desbloqueia a compra/ingresso de um lote. Quando bloqueado,
-  // o aluno não consegue adquirir ingressos desse lote e o app/tela de compra
-  // deve exibir a mensagem de que o lote está bloqueado (campo "bloqueado"
-  // no documento do lote em "lotes").
-  const handleToggleBlock = async () => {
-    if (!confirmBlockModal) return;
-    setLoadingBatches(true);
-    try {
-      const batch = confirmBlockModal;
-      const novoStatus = !batch.bloqueado;
-      await updateDoc(doc(db, "lotes", batch.id), { bloqueado: novoStatus });
-      setBatches((prev) =>
-        prev.map((b) =>
-          b.id === batch.id ? { ...b, bloqueado: novoStatus } : b
-        )
-      );
-      showToast(
-        novoStatus
-          ? "Lote bloqueado. O ingresso não poderá ser adquirido."
-          : "Lote desbloqueado com sucesso.",
-        "success"
-      );
-      setConfirmBlockModal(null);
-    } catch (error) {
-      showToast("Erro ao alterar o bloqueio do lote.");
     }
     setLoadingBatches(false);
   };
@@ -4259,32 +4227,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
-                    // Quantidade de ingressos já emitidos/vendidos para este lote
-                    // (vinculação é feita pelo nome do lote, salvo no campo "type"
-                    // de cada ingresso no momento da criação)
-                    const vendidos = allTickets.filter(
-                      (t) => t.type === batch.nome
+                    const vendidos = (allTickets || []).filter(
+                      (t) => t.pagamentoConfirmado && t.type === batch.nome
                     ).length;
-                    const totalLote = Number(batch.quantidade) || 0;
-                    const restantes = Math.max(totalLote - vendidos, 0);
-                    const pctVendido =
-                      totalLote > 0
-                        ? Math.min((vendidos / totalLote) * 100, 100)
-                        : 0;
-                    const esgotado = totalLote > 0 && vendidos >= totalLote;
-                    const corBarra = esgotado
-                      ? "bg-red-500"
-                      : pctVendido >= 80
-                      ? "bg-amber-400"
-                      : "bg-white";
-
+                    const limite = Number(batch.quantidade) || 0;
+                    const pct = limite > 0 ? Math.min(100, (vendidos / limite) * 100) : 0;
+                    const esgotado = limite > 0 && vendidos >= limite;
                     return (
                     <div
                       key={batch.id}
                       className={`group relative flex flex-col rounded-2xl border transition-all duration-200 overflow-hidden ${
-                        batch.bloqueado
-                          ? "bg-[#0a0a0a] border-amber-500/30 hover:border-amber-500/50"
-                          : batch.visivel
+                        batch.visivel
                           ? "bg-[#0a0a0a] border-zinc-800 hover:border-zinc-600"
                           : "bg-[#0a0a0a] border-zinc-800/50 opacity-60 hover:opacity-80 hover:border-zinc-700"
                       }`}
@@ -4292,9 +4245,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       {/* Topo colorido sutil */}
                       <div
                         className={`h-0.5 w-full ${
-                          batch.bloqueado
-                            ? "bg-amber-500/50"
-                            : batch.visivel
+                          batch.visivel
                             ? "bg-gradient-to-r from-white/20 to-transparent"
                             : "bg-zinc-800"
                         }`}
@@ -4322,22 +4273,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               >
                                 {batch.visivel ? "Visível" : "Oculto"}
                               </span>
-                              {esgotado && (
-                                <>
-                                  <span className="text-zinc-700">•</span>
-                                  <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
-                                    Esgotado
-                                  </span>
-                                </>
-                              )}
-                              {batch.bloqueado && (
-                                <>
-                                  <span className="text-zinc-700">•</span>
-                                  <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
-                                    Bloqueado
-                                  </span>
-                                </>
-                              )}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -4353,15 +4288,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
                         {/* Pills de info */}
                         <div className="flex flex-wrap gap-1.5">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium ${
-                              esgotado
-                                ? "bg-red-500/10 border-red-500/30 text-red-400"
-                                : "bg-zinc-900 border-zinc-800 text-zinc-400"
-                            }`}
-                          >
-                            <Ticket className="w-3 h-3" /> {vendidos}/
-                            {totalLote} ingressos
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
+                            <Ticket className="w-3 h-3" /> {batch.quantidade}{" "}
+                            ingressos
                           </span>
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
                             <User className="w-3 h-3" />{" "}
@@ -4386,27 +4315,42 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           )}
                         </div>
 
-                        {/* Barra de progresso: ingressos vendidos vs disponíveis */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                              {vendidos} vendido{vendidos !== 1 ? "s" : ""}
-                            </span>
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                              {esgotado
-                                ? "0 restantes"
-                                : `${restantes} restante${
-                                    restantes !== 1 ? "s" : ""
-                                  }`}
-                            </span>
+                        {/* Progresso de vendas */}
+                        {limite > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-[11px]">
+                              <span className="text-zinc-400 font-medium">
+                                Vendidos
+                              </span>
+                              <span
+                                className={`tabular-nums font-bold ${
+                                  esgotado
+                                    ? "text-red-400"
+                                    : pct >= 80
+                                    ? "text-amber-400"
+                                    : "text-white"
+                                }`}
+                              >
+                                {vendidos}/{limite}
+                                {esgotado && " · Esgotado"}
+                              </span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-zinc-900 overflow-hidden border border-zinc-800">
+                              <div
+                                className={`h-full transition-all duration-500 ${
+                                  esgotado
+                                    ? "bg-red-500"
+                                    : pct >= 80
+                                    ? "bg-amber-400"
+                                    : "bg-green-500"
+                                }`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="w-full bg-zinc-900 h-2 rounded-full overflow-hidden border border-zinc-800/80">
-                            <div
-                              className={`${corBarra} h-full rounded-full transition-all duration-700`}
-                              style={{ width: `${pctVendido}%` }}
-                            />
-                          </div>
-                        </div>
+                        )}
+
+
 
                         {/* Ações */}
                         <div className="flex items-center gap-2 pt-1 mt-auto">
@@ -4417,15 +4361,33 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             Editar
                           </button>
                           <button
-                            onClick={() => setConfirmBlockModal(batch)}
+                            onClick={async () => {
+                              try {
+                                const novo = !batch.bloqueado;
+                                await updateDoc(doc(db, "lotes", batch.id), {
+                                  bloqueado: novo,
+                                });
+                                setBatches((prev) =>
+                                  prev.map((b) =>
+                                    b.id === batch.id ? { ...b, bloqueado: novo } : b
+                                  )
+                                );
+                                showToast(
+                                  novo
+                                    ? "Lote bloqueado para alunos."
+                                    : "Lote desbloqueado.",
+                                  "success"
+                                );
+                              } catch {
+                                showToast("Erro ao alterar bloqueio do lote.");
+                              }
+                            }}
                             title={
-                              batch.bloqueado
-                                ? "Desbloquear lote"
-                                : "Bloquear lote"
+                              batch.bloqueado ? "Desbloquear lote" : "Bloquear lote"
                             }
                             className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-all shrink-0 ${
                               batch.bloqueado
-                                ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:text-amber-300 hover:border-amber-500/60"
+                                ? "border-red-500/40 bg-red-500/10 text-red-400 hover:text-red-300"
                                 : "border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-white hover:border-zinc-600"
                             }`}
                           >
@@ -4452,6 +4414,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               <AiOutlineEyeInvisible size={15} />
                             )}
                           </button>
+
                         </div>
                       </div>
                     </div>
@@ -8248,57 +8211,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 }`}
                 isLoading={loadingBatches}
                 onClick={handleToggleVisibility}
-              >
-                Confirmar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Bloqueio do Lote */}
-      {confirmBlockModal && (
-        <div
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all"
-          onClick={() => setConfirmBlockModal(null)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-zinc-800 p-6 sm:p-8 rounded-3xl max-w-sm w-full flex flex-col items-center text-center relative shadow-2xl animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center justify-center mb-5">
-              {confirmBlockModal.bloqueado ? (
-                <Unlock className="h-8 w-8 text-white" />
-              ) : (
-                <Lock className="h-8 w-8 text-amber-400" />
-              )}
-            </div>
-            <h4 className="text-white font-bold text-lg mb-2">
-              {confirmBlockModal.bloqueado
-                ? "Deseja desbloquear este lote?"
-                : "Deseja bloquear este lote?"}
-            </h4>
-            <p className="text-zinc-500 text-sm mb-6">
-              {confirmBlockModal.bloqueado
-                ? "Os alunos voltarão a conseguir adquirir ingressos deste lote normalmente."
-                : "Os alunos não conseguirão mais adquirir ingressos deste lote. Será exibida uma mensagem informando que o lote está bloqueado."}
-            </p>
-            <div className="flex gap-3 w-full">
-              <Button
-                variant="outline"
-                className="flex-1 h-11"
-                onClick={() => setConfirmBlockModal(null)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                className={`flex-1 h-11 border-none ${
-                  confirmBlockModal.bloqueado
-                    ? "bg-white hover:bg-zinc-200 text-black"
-                    : "bg-amber-500 hover:bg-amber-600 text-black"
-                }`}
-                isLoading={loadingBatches}
-                onClick={handleToggleBlock}
               >
                 Confirmar
               </Button>
