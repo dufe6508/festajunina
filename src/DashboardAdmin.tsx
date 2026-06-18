@@ -63,6 +63,7 @@ import {
   deleteDoc,
   deleteField,
   runTransaction,
+  increment,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -638,7 +639,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         const list = [];
         snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
         // Ordenação alfabética simples
-        setBatches(list.sort((a, b) => a.nome.localeCompare(b.nome)));
+        const sorted = list.sort((a, b) => a.nome.localeCompare(b.nome));
+
+        // Sincroniza ingressosAssociados com a contagem real da DB para lotes
+        // que ainda não têm o campo (backwards compat com ingressos existentes)
+        const ticketsSnap = await getDocs(collection(db, "ingressos"));
+        const allT: any[] = [];
+        ticketsSnap.forEach((d) => allT.push({ id: d.id, ...d.data() }));
+
+        const synced = sorted.map((b) => {
+          const count = allT.filter(
+            (t) => t.loteId === b.id || t.type === b.nome
+          ).length;
+          // Se o campo ainda não existe ou está desatualizado, corrige
+          if (b.ingressosAssociados == null || b.ingressosAssociados < count) {
+            updateDoc(doc(db, "lotes", b.id), { ingressosAssociados: count }).catch(() => {});
+            return { ...b, ingressosAssociados: count };
+          }
+          return b;
+        });
+
+        setBatches(synced);
       }
     } catch (error) {
       showToast("Erro ao buscar lotes.");
@@ -1253,6 +1274,24 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       };
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
 
+      // Incrementa o contador de ingressos associados no lote (contabiliza qualquer origem)
+      if (loteSelecionado?.id) {
+        try {
+          await updateDoc(doc(db, "lotes", loteSelecionado.id), {
+            ingressosAssociados: increment(1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === loteSelecionado.id
+                ? { ...b, ingressosAssociados: (b.ingressosAssociados || 0) + 1 }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao incrementar contador do lote:", e);
+        }
+      }
+
       // Envia e-mail com o ingresso, para o e-mail já cadastrado no login
       // do aluno/responsável (se existir) ou para o e-mail informado agora
       const emailDestino =
@@ -1333,6 +1372,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setStudentModalLoading(true);
     try {
       await deleteDoc(doc(db, "ingressos", studentModalTicket.id));
+
+      // Decrementa o contador do lote ao excluir ingresso
+      if (studentModalTicket.loteId) {
+        try {
+          await updateDoc(doc(db, "lotes", studentModalTicket.loteId), {
+            ingressosAssociados: increment(-1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === studentModalTicket.loteId
+                ? { ...b, ingressosAssociados: Math.max(0, (b.ingressosAssociados || 0) - 1) }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao decrementar contador do lote:", e);
+        }
+      }
+
       setAllTickets((prev) =>
         prev.filter((t) => t.id !== studentModalTicket.id)
       );
@@ -1925,6 +1983,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           : null,
       };
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      // Incrementa o contador de ingressos associados no lote (contabiliza qualquer origem)
+      if (loteSelecionado?.id) {
+        try {
+          await updateDoc(doc(db, "lotes", loteSelecionado.id), {
+            ingressosAssociados: increment(1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === loteSelecionado.id
+                ? { ...b, ingressosAssociados: (b.ingressosAssociados || 0) + 1 }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao incrementar contador do lote:", e);
+        }
+      }
+
       setAllTickets((prev) =>
         [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
           (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
@@ -1974,6 +2051,25 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setResponsavelModalLoading(true);
     try {
       await deleteDoc(doc(db, "ingressos", responsavelModalTicket.id));
+
+      // Decrementa o contador do lote ao excluir ingresso
+      if (responsavelModalTicket.loteId) {
+        try {
+          await updateDoc(doc(db, "lotes", responsavelModalTicket.loteId), {
+            ingressosAssociados: increment(-1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === responsavelModalTicket.loteId
+                ? { ...b, ingressosAssociados: Math.max(0, (b.ingressosAssociados || 0) - 1) }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao decrementar contador do lote:", e);
+        }
+      }
+
       setAllTickets((prev) =>
         prev.filter((t) => t.id !== responsavelModalTicket.id)
       );
@@ -2406,9 +2502,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const excluirIngresso = async (ticketId) => {
     setAdminLoading(true);
     try {
+      const ticketToDelete = allTickets.find((t) => t.id === ticketId);
       await deleteDoc(doc(db, "ingressos", ticketId));
-      // O contador não é mais usado: generateTicketCode lê os ingressos
-      // existentes e preenche o menor número vago automaticamente.
+
+      // Decrementa o contador do lote ao excluir ingresso
+      if (ticketToDelete?.loteId) {
+        try {
+          await updateDoc(doc(db, "lotes", ticketToDelete.loteId), {
+            ingressosAssociados: increment(-1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === ticketToDelete.loteId
+                ? { ...b, ingressosAssociados: Math.max(0, (b.ingressosAssociados || 0) - 1) }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao decrementar contador do lote:", e);
+        }
+      }
+
       setAllTickets((prev) => prev.filter((t) => t.id !== ticketId));
       showToast("Ingresso excluído com sucesso!", "success");
       setConfirmDeleteTicket(null);
@@ -2488,6 +2602,24 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       };
 
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      // Incrementa o contador de ingressos associados no lote (contabiliza qualquer origem)
+      if (loteSelecionado?.id) {
+        try {
+          await updateDoc(doc(db, "lotes", loteSelecionado.id), {
+            ingressosAssociados: increment(1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === loteSelecionado.id
+                ? { ...b, ingressosAssociados: (b.ingressosAssociados || 0) + 1 }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao incrementar contador do lote:", e);
+        }
+      }
 
       // Envia e-mail com o ingresso
       try {
@@ -4315,9 +4447,14 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     const totalNaDB = (allTickets || []).filter(
                       (t) => t.loteId === batch.id || t.type === batch.nome
                     ).length;
+                    // Usa o contador persistido no lote (atualizado em toda associação/exclusão).
+                    // Faz fallback para a contagem client-side enquanto não há o campo no doc.
+                    const totalExibido = batch.ingressosAssociados != null
+                      ? Math.max(batch.ingressosAssociados, totalNaDB)
+                      : totalNaDB;
                     const limite = Number(batch.quantidade) || 0;
-                    const pct = limite > 0 ? Math.min(100, (totalNaDB / limite) * 100) : 0;
-                    const esgotado = limite > 0 && totalNaDB >= limite;
+                    const pct = limite > 0 ? Math.min(100, (totalExibido / limite) * 100) : 0;
+                    const esgotado = limite > 0 && totalExibido >= limite;
                     return (
                     <div
                       key={batch.id}
@@ -4374,7 +4511,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         {/* Pills de info */}
                         <div className="flex flex-wrap gap-1.5">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
-                            <Ticket className="w-3 h-3" /> {totalNaDB}/{batch.quantidade}{" "}
+                            <Ticket className="w-3 h-3" /> {totalExibido}/{batch.quantidade}{" "}
                             ingressos
                           </span>
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
@@ -4416,7 +4553,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     : "text-white"
                                 }`}
                               >
-                                {totalNaDB}/{limite}
+                                {totalExibido}/{limite}
                                 {esgotado && " · Esgotado"}
                               </span>
                             </div>
