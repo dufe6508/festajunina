@@ -452,6 +452,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     null
   ); // turmaId
   const [deleteClassLoading, setDeleteClassLoading] = useState(false);
+  const [noCpfPopoverOpen, setNoCpfPopoverOpen] = useState(false);
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState(false);
   const [deleteStudentLoading, setDeleteStudentLoading] = useState(false);
   // Pesquisar alunos
@@ -899,10 +900,32 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         .filter((r) => r.nome || r.turma || r.ano || r.cpf); // ignora linhas completamente vazias
       const blockingErrors: string[] = [];
       const cpfWarnings: string[] = [];
+
+      // Busca CPFs já existentes no Firestore para detectar duplicatas na preview
+      const cpfsExistentesPreview = new Set<string>();
+      try {
+        const anosSnap = await getDocs(collection(db, "alunos"));
+        for (const turmaDoc of anosSnap.docs) {
+          const alunosSnap = await getDocs(
+            collection(db, "alunos", turmaDoc.id, "lista")
+          );
+          alunosSnap.forEach((d) => {
+            const cpfDigits = (d.data().cpf || "").replace(/\D/g, "");
+            if (cpfDigits) cpfsExistentesPreview.add(cpfDigits);
+          });
+        }
+      } catch (e) {
+        console.warn("Erro ao buscar CPFs para verificação de duplicatas:", e);
+      }
+
       normalized.forEach((r) => {
         const { blockingError, cpfWarning } = validateRow(r, r._row);
         if (blockingError) blockingErrors.push(blockingError);
-        if (cpfWarning) cpfWarnings.push(cpfWarning);
+        else if (cpfWarning) cpfWarnings.push(cpfWarning);
+        else if (r.cpf && cpfsExistentesPreview.has(r.cpf))
+          cpfWarnings.push(
+            `${r.nome} (${r.ano}º ${r.turma}): CPF duplicado — já existe no sistema`
+          );
       });
       setImportErrors(blockingErrors);
       setImportCpfWarnings(cpfWarnings);
@@ -921,10 +944,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setImportResult(null);
 
     try {
-      // Alunos com CPF inválido são importados sem CPF
+      // Alunos listados nos avisos (CPF inválido ou duplicado) são importados sem CPF
+      const warnSet = new Set(importCpfWarnings.map((w) => w.split(":")[0].trim()));
       const normalized = importPreview.map((r) => {
-        const { cpfWarning } = validateRow(r, r._row);
-        return cpfWarning ? { ...r, cpf: "" } : r;
+        const label = `${r.nome} (${r.ano}º ${r.turma})`;
+        return warnSet.has(label) ? { ...r, cpf: "" } : r;
       });
 
       let success = 0,
@@ -6535,18 +6559,72 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           ) : (
                             <div className="divide-y divide-zinc-800/50">
                               {/* Header da tabela */}
-                              <div className="grid grid-cols-[32px_1fr_150px_40px] gap-0 px-5 py-3 bg-zinc-900/30">
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                                  #
-                                </span>
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                                  Nome
-                                </span>
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                                  CPF
-                                </span>
-                                <span></span>
-                              </div>
+                              {(() => {
+                                const semCpfList = alunos.filter(
+                                  (a) => !(a.cpf || "").replace(/\D/g, "")
+                                );
+                                return (
+                                  <div className="grid grid-cols-[32px_1fr_150px_40px] gap-0 px-5 py-3 bg-zinc-900/30">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                      #
+                                    </span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                      Nome
+                                    </span>
+                                    <div className="flex items-center gap-1.5 relative">
+                                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                        CPF
+                                      </span>
+                                      {semCpfList.length > 0 && (
+                                        <div className="relative">
+                                          <button
+                                            onClick={() => setNoCpfPopoverOpen((v) => !v)}
+                                            className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-orange-500/20 transition-colors"
+                                            title={`${semCpfList.length} aluno(s) sem CPF`}
+                                          >
+                                            <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />
+                                          </button>
+                                          {noCpfPopoverOpen && (
+                                            <>
+                                              <div
+                                                className="fixed inset-0 z-[40]"
+                                                onClick={() => setNoCpfPopoverOpen(false)}
+                                              />
+                                              <div className="absolute left-0 top-6 z-[50] w-64 bg-[#111] border border-orange-500/30 rounded-xl shadow-2xl overflow-hidden">
+                                                <div className="flex items-center gap-2 px-3 py-2.5 border-b border-orange-500/20 bg-orange-500/5">
+                                                  <AlertTriangle className="h-3.5 w-3.5 text-orange-400 shrink-0" />
+                                                  <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">
+                                                    {semCpfList.length} aluno{semCpfList.length !== 1 ? "s" : ""} sem CPF
+                                                  </p>
+                                                </div>
+                                                <ul className="max-h-52 overflow-y-auto divide-y divide-zinc-800/60" style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}>
+                                                  {semCpfList.map((a, idx) => (
+                                                    <li key={idx} className="px-3 py-2 flex items-center gap-2">
+                                                      <span className="text-[10px] font-mono text-zinc-600 tabular-nums w-5 shrink-0">
+                                                        {alunos.indexOf(a) + 1}
+                                                      </span>
+                                                      <button
+                                                        onClick={() => {
+                                                          setNoCpfPopoverOpen(false);
+                                                          openStudentModal(a, `${classesYear}${classesClass}`);
+                                                        }}
+                                                        className="text-xs text-zinc-300 hover:text-white text-left truncate transition-colors"
+                                                      >
+                                                        {a.nome}
+                                                      </button>
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                              </div>
+                                            </>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <span></span>
+                                  </div>
+                                );
+                              })()}
                               {alunos.map((aluno, i) => {
                                 const cpfDigits = (aluno.cpf || "").replace(
                                   /\D/g,
@@ -9241,7 +9319,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   Importar alunos sem CPF?
                 </h3>
                 <p className="text-zinc-400 text-sm mt-1">
-                  {importCpfWarnings.length} aluno{importCpfWarnings.length !== 1 ? "s" : ""} com CPF inválido serão importados sem CPF. Você poderá inserir o CPF manualmente pelo perfil de cada aluno.
+                  {importCpfWarnings.length} aluno{importCpfWarnings.length !== 1 ? "s" : ""} com CPF inválido ou duplicado {importCpfWarnings.length !== 1 ? "serão importados" : "será importado"} sem CPF. Você poderá inserir o CPF manualmente pelo perfil de cada aluno.
                 </p>
               </div>
             </div>
