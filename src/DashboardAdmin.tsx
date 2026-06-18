@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Loader2,
@@ -9297,7 +9296,3 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     </div>
   );
 }
-
-export const Route = createFileRoute("/admin")({
-  component: DashboardAdmin,
-});
