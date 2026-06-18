@@ -330,11 +330,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   } | null>(null);
   const [importDragActive, setImportDragActive] = useState(false);
   const [importTypeErrors, setImportTypeErrors] = useState<string[]>([]);
-  const [importCpfWarnings, setImportCpfWarnings] = useState<string[]>([]);
-  const [importConfirmModal, setImportConfirmModal] = useState(false);
-  const [importPreviewTurmaTab, setImportPreviewTurmaTab] = useState<
-    string | null
-  >(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
   // Estados: Importação de Pais/Responsáveis
@@ -388,11 +383,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<
     any[]
   >([]);
-  // Edição inline do CPF do aluno (usado quando o aluno foi importado sem CPF)
-  const [editingStudentCpf, setEditingStudentCpf] = useState(false);
-  const [editStudentCpfValue, setEditStudentCpfValue] = useState("");
-  const [editStudentCpfError, setEditStudentCpfError] = useState("");
-  const [savingStudentCpf, setSavingStudentCpf] = useState(false);
 
   // Estados: Responsáveis
   const [responsavelSearch, setResponsavelSearch] = useState("");
@@ -452,7 +442,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     null
   ); // turmaId
   const [deleteClassLoading, setDeleteClassLoading] = useState(false);
-  const [noCpfPopoverOpen, setNoCpfPopoverOpen] = useState(false);
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState(false);
   const [deleteStudentLoading, setDeleteStudentLoading] = useState(false);
   // Pesquisar alunos
@@ -649,148 +638,40 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       document.head.appendChild(s);
     });
 
-  // Tenta extrair "ano" e "turma" de um texto de série/turma vindo do
-  // cabeçalho institucional da planilha da escola, ex: "2º A", "3º E".
-  // Retorna null se não conseguir reconhecer o padrão.
-  const parseAnoTurmaFromHeaderText = (
-    text: string
-  ): { ano: string; turma: string } | null => {
-    const t = String(text || "").trim();
-    // Aceita "2º A", "2º  A", "2A", "2 - A", etc.
-    const m = t.match(/([123])\s*[º°]?\s*[-–]?\s*([A-Za-z])\b/);
-    if (!m) return null;
-    return { ano: m[1], turma: m[2].toUpperCase() };
-  };
-
-  // Detecta se uma aba está no formato "institucional" da escola:
-  // linhas de cabeçalho fixas (escola, título, nível/série/turno) seguidas
-  // de uma linha "Nº | Nome | | CPF" e então os alunos.
-  // Retorna o índice da linha de dados (primeira linha após o cabeçalho
-  // "Nº/Nome/CPF") e o ano/turma encontrados, ou null se não reconhecer.
-  const detectSchoolSheetFormat = (
-    raw: any[][]
-  ): { ano: string; turma: string; dataStartRow: number } | null => {
-    let ano = "";
-    let turma = "";
-    let headerRowIdx = -1;
-
-    for (let i = 0; i < Math.min(raw.length, 15); i++) {
-      const row = raw[i] || [];
-      const rowText = row.map((c) => String(c ?? "")).join(" | ");
-
-      // Linha "Nivel de Ensino: ... 2º A" ou "Ano/Sêrie/Etapa: ... 2º REG 1"
-      if (/nivel de ensino|ano\/s[eê]rie|s[eé]rie\/etapa/i.test(rowText)) {
-        for (const cell of row) {
-          const parsed = parseAnoTurmaFromHeaderText(String(cell ?? ""));
-          if (parsed) {
-            ano = parsed.ano;
-            turma = parsed.turma;
-          }
-        }
-      }
-
-      // Linha de cabeçalho da tabela: "Nº | Nome | | CPF"
-      // Observação: "º" (U+00BA, indicador ordinal) não é removido pela
-      // normalização NFD acima porque não é um diacrítico combinável —
-      // por isso é removido explicitamente aqui.
-      const normCells = row.map((c) =>
-        String(c ?? "")
-          .trim()
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[º°]/g, "")
-          .trim()
-      );
-      if (
-        normCells.some((c) => c === "no" || c === "n" || c === "n.") &&
-        normCells.some((c) => c === "nome") &&
-        normCells.some((c) => c === "cpf")
-      ) {
-        headerRowIdx = i;
-        break;
-      }
-    }
-
-    if (headerRowIdx === -1 || !ano || !turma) return null;
-    return { ano, turma, dataStartRow: headerRowIdx + 1 };
-  };
-
-  // Lê um File (.xlsx ou .csv) e retorna array de objetos linha,
-  // já com { nome, ano, turma, cpf, _row, _sheet }.
-  // Suporta dois formatos:
-  //  1) "Institucional" (planilha da escola): uma aba por turma, com
-  //     cabeçalho fixo (escola, nível, série/turma, turno) nas primeiras
-  //     linhas e alunos a partir da linha "Nº | Nome | | CPF". TODAS as
-  //     abas do arquivo são lidas, não só a primeira.
-  //  2) "Genérico": primeira linha com cabeçalho de colunas
-  //     (ano, turma, nome, cpf) — comportamento legado, mantido para
-  //     planilhas simples de uma aba só.
+  // Lê um File (.xlsx ou .csv) e retorna array de objetos linha
   const parseFile = async (file: File): Promise<any[]> => {
     const XLSX = await loadXLSX();
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: "array", raw: false });
-
-    const allRows: any[] = [];
-
-    for (const sheetName of wb.SheetNames) {
-      const ws = wb.Sheets[sheetName];
-      const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
-        header: 1,
-        defval: "",
-      });
-      if (raw.length === 0) continue;
-
-      const schoolFormat = detectSchoolSheetFormat(raw);
-
-      if (schoolFormat) {
-        // Formato institucional: colunas fixas Nº(0) | Nome(2) | CPF(3)
-        const { ano, turma, dataStartRow } = schoolFormat;
-        for (let i = dataStartRow; i < raw.length; i++) {
-          const row = raw[i] || [];
-          const nome = String(row[2] ?? row[1] ?? "").trim();
-          const cpf = String(row[3] ?? "").trim();
-          if (!nome) continue; // pula linhas vazias da numeração residual
-          allRows.push({
-            nome,
-            ano,
-            turma,
-            cpf,
-            _row: i + 1,
-            _sheet: sheetName,
-          });
-        }
-        continue;
-      }
-
-      // Formato genérico: primeira linha é cabeçalho de colunas
-      if (raw.length < 2) continue;
-      const headers = (raw[0] as string[]).map((h) =>
-        String(h)
-          .trim()
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]/g, "")
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    // header: 1 → array de arrays; depois convertemos para objetos
+    const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      defval: "",
+    });
+    if (raw.length < 2) return [];
+    const headers = (raw[0] as string[]).map((h) =>
+      String(h)
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, "")
+    );
+    return raw
+      .slice(1)
+      .map((row, idx) => {
+        const obj: any = { _row: idx + 2 };
+        headers.forEach((h, i) => {
+          obj[h] = String(row[i] ?? "").trim();
+        });
+        return obj;
+      })
+      .filter((obj) =>
+        Object.entries(obj)
+          .filter(([k]) => k !== "_row")
+          .some(([, v]) => String(v).trim() !== "")
       );
-      const genericRows = raw
-        .slice(1)
-        .map((row, idx) => {
-          const obj: any = { _row: idx + 2, _sheet: sheetName };
-          headers.forEach((h, i) => {
-            obj[h] = String(row[i] ?? "").trim();
-          });
-          return obj;
-        })
-        .filter((obj) =>
-          Object.entries(obj)
-            .filter(([k]) => k !== "_row" && k !== "_sheet")
-            .some(([, v]) => String(v).trim() !== "")
-        );
-      allRows.push(...genericRows);
-    }
-
-    return allRows;
   };
 
   // Normaliza os dados para o formato esperado: nome, turma, ano, cpf
@@ -814,34 +695,19 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   };
 
   // Valida uma linha normalizada
-  // CPF é opcional: se vier vazio, o aluno é importado sem CPF (a escola
-  // pode completar depois pelo modal do aluno). Se vier preenchido mas
-  // com formato inválido, ainda bloqueia a importação dessa linha.
   const validateRow = (
     r: { nome: string; turma: string; ano: string; cpf: string },
     rowNum: number
-  ): { blockingError: string | null; cpfWarning: string | null } => {
+  ): string | null => {
     if (!r.nome || r.nome.length < 3)
-      return {
-        blockingError: `Linha ${rowNum}: Nome inválido ("${r.nome}")`,
-        cpfWarning: null,
-      };
+      return `Linha ${rowNum}: Nome inválido ("${r.nome}")`;
     if (!["1", "2", "3"].includes(r.ano))
-      return {
-        blockingError: `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`,
-        cpfWarning: null,
-      };
+      return `Linha ${rowNum}: Ano deve ser 1, 2 ou 3 — encontrado "${r.ano}"`;
     if (!/^[A-L]$/.test(r.turma))
-      return {
-        blockingError: `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`,
-        cpfWarning: null,
-      };
-    if (r.cpf && r.cpf.length !== 11)
-      return {
-        blockingError: null,
-        cpfWarning: `${r.nome} (${r.ano}º ${r.turma}): CPF inválido — ${r.cpf.length} dígito${r.cpf.length !== 1 ? "s" : ""} encontrado${r.cpf.length !== 1 ? "s" : ""}`,
-      };
-    return { blockingError: null, cpfWarning: null };
+      return `Linha ${rowNum}: Turma deve ser letra A-L — encontrado "${r.turma}"`;
+    if (r.cpf.length !== 11)
+      return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
+    return null;
   };
 
   // Tipos de arquivo permitidos
@@ -859,8 +725,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setImportErrors([]);
     setImportPreview([]);
     setImportTypeErrors([]);
-    setImportCpfWarnings([]);
-    setImportPreviewTurmaTab(null);
 
     // Separar válidos e inválidos por tipo
     const invalid = fileArray.filter((f) => !isAllowedFile(f));
@@ -895,64 +759,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         ]);
         return;
       }
-      const normalized = allRows
-        .map((r) => ({ ...normalizeRow(r), _row: r._row }))
-        .filter((r) => r.nome || r.turma || r.ano || r.cpf); // ignora linhas completamente vazias
-      const blockingErrors: string[] = [];
-      const cpfWarnings: string[] = [];
-
-      // Busca CPFs já existentes no Firestore para detectar duplicatas na preview
-      const cpfsExistentesPreview = new Set<string>();
-      try {
-        const anosSnap = await getDocs(collection(db, "alunos"));
-        for (const turmaDoc of anosSnap.docs) {
-          const alunosSnap = await getDocs(
-            collection(db, "alunos", turmaDoc.id, "lista")
-          );
-          alunosSnap.forEach((d) => {
-            const cpfDigits = (d.data().cpf || "").replace(/\D/g, "");
-            if (cpfDigits) cpfsExistentesPreview.add(cpfDigits);
-          });
-        }
-      } catch (e) {
-        console.warn("Erro ao buscar CPFs para verificação de duplicatas:", e);
-      }
-
-      // Detecta CPFs duplicados DENTRO da própria planilha (duas ou mais
-      // linhas do mesmo arquivo com o mesmo CPF). Sem isso, alunos repetidos
-      // no arquivo passavam direto sem nenhum aviso.
-      const cpfCountNoArquivo = new Map<string, number>();
+      const normalized = allRows.map((r) => ({
+        ...normalizeRow(r),
+        _row: r._row,
+      }));
+      const errors: string[] = [];
       normalized.forEach((r) => {
-        if (r.cpf && r.cpf.length === 11) {
-          cpfCountNoArquivo.set(r.cpf, (cpfCountNoArquivo.get(r.cpf) || 0) + 1);
-        }
+        const err = validateRow(r, r._row);
+        if (err) errors.push(err);
       });
-
-      normalized.forEach((r) => {
-        const { blockingError, cpfWarning } = validateRow(r, r._row);
-        const label = `${r.nome} (${r.ano}º ${r.turma})`;
-        if (blockingError) {
-          blockingErrors.push(blockingError);
-          return;
-        }
-        if (cpfWarning) {
-          // CPF com formato inválido (não tem 11 dígitos)
-          cpfWarnings.push(`${cpfWarning} (CPF inválido)`);
-          return;
-        }
-        if (r.cpf && cpfsExistentesPreview.has(r.cpf)) {
-          cpfWarnings.push(`${label}: CPF duplicado — já existe no sistema`);
-          return;
-        }
-        if (r.cpf && (cpfCountNoArquivo.get(r.cpf) || 0) > 1) {
-          cpfWarnings.push(
-            `${label}: CPF duplicado — repetido ${cpfCountNoArquivo.get(r.cpf)}x na planilha`
-          );
-          return;
-        }
-      });
-      setImportErrors(blockingErrors);
-      setImportCpfWarnings(cpfWarnings);
+      setImportErrors(errors);
       setImportPreview(normalized);
     } catch (err) {
       setImportErrors([
@@ -963,22 +779,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
   const handleImportSubmit = async () => {
     if (importPreview.length === 0 || importErrors.length > 0) return;
-    setImportConfirmModal(false);
     setImportLoading(true);
     setImportResult(null);
 
     try {
-      // Alunos listados nos avisos (CPF inválido ou duplicado) são importados
-      // sem CPF — guardamos quais para também contabilizá-los como
-      // "duplicatas/CPF irregular" no resultado final, em vez de sumirem
-      // misturados no contador de sucesso.
-      const warnSet = new Set(importCpfWarnings.map((w) => w.split(":")[0].trim()));
-      const normalized = importPreview.map((r) => {
-        const label = `${r.nome} (${r.ano}º ${r.turma})`;
-        return warnSet.has(label)
-          ? { ...r, cpf: "", _cpfIrregular: true }
-          : { ...r, _cpfIrregular: false };
-      });
+      // Usa o preview já normalizado e validado — não faz novo parse
+      const normalized = importPreview;
 
       let success = 0,
         failed = 0,
@@ -1004,15 +810,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
 
       for (const row of normalized) {
-        const { blockingError } = validateRow(row, row._row);
-        if (blockingError) {
+        const err = validateRow(row, row._row);
+        if (err) {
           failed++;
           continue;
         }
-        // Só verifica duplicidade quando o aluno tem CPF — sem CPF, não
-        // há como saber se é duplicata, então sempre importa e deixa a
-        // escola conferir manualmente depois (ver indicador "sem CPF").
-        if (row.cpf && cpfsExistentes.has(row.cpf)) {
+        if (cpfsExistentes.has(row.cpf)) {
           duplicates++;
           continue;
         }
@@ -1035,17 +838,12 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             nome: row.nome,
             turma: row.turma,
             ano: row.ano,
-            cpf: row.cpf || "",
+            cpf: row.cpf,
             sala: turmaId,
             cadastradoEm: new Date().toISOString(),
           });
-          if (row.cpf) cpfsExistentes.add(row.cpf);
-          // Alunos com CPF inválido/duplicado que entraram sem CPF contam
-          // como "duplicatas/CPF irregular", não como sucesso pleno —
-          // assim o contador no resumo reflete a realidade e o admin sabe
-          // quantos alunos precisam de revisão manual de CPF.
-          if (row._cpfIrregular) duplicates++;
-          else success++;
+          cpfsExistentes.add(row.cpf);
+          success++;
         } catch (e) {
           console.error("Erro ao salvar aluno:", row, e);
           failed++;
@@ -1053,15 +851,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
 
       setImportResult({ success, failed, duplicates });
-      if (success > 0 || duplicates > 0) {
-        const extra =
-          duplicates > 0
-            ? ` (${duplicates} sem CPF por inconsistência — revise manualmente)`
-            : "";
-        showToast(
-          `${success + duplicates} aluno(s) importado(s) com sucesso!${extra}`,
-          "success"
-        );
+      if (success > 0) {
+        showToast(`${success} aluno(s) importado(s) com sucesso!`, "success");
       } else {
         showToast(
           "Nenhum aluno foi importado. Verifique os dados e as permissões do Firebase.",
@@ -1346,9 +1137,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setStudentModalTicket(null);
     setStudentModalResponsaveis([]);
     setStudentModalLoading(true);
-    setEditingStudentCpf(false);
-    setEditStudentCpfValue("");
-    setEditStudentCpfError("");
     setAssociarForm({
       loteId: "",
       email: "",
@@ -1395,49 +1183,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
     } catch {}
     setStudentModalLoading(false);
-  };
-
-  // ── Salva (adiciona ou edita) o CPF do aluno a partir do modal ──
-  // Usado principalmente para completar o CPF de alunos importados sem
-  // CPF (ver indicador "sem CPF" na lista da turma).
-  const handleSaveStudentCpf = async () => {
-    if (!studentModal) return;
-    const digits = editStudentCpfValue.replace(/\D/g, "");
-    if (digits && digits.length !== 11) {
-      setEditStudentCpfError("CPF deve ter 11 dígitos");
-      return;
-    }
-    setEditStudentCpfError("");
-    setSavingStudentCpf(true);
-    try {
-      const turmaId =
-        studentModal.turmaId || `${studentModal.ano}${studentModal.turma}`;
-      const nomeId =
-        studentModal.id || studentModal.nome?.trim().replace(/\s+/g, "_");
-      await updateDoc(doc(db, "alunos", turmaId, "lista", nomeId), {
-        cpf: digits,
-      });
-      const updated = { ...studentModal, cpf: digits };
-      setStudentModal(updated);
-      setClassesData((prev) => {
-        const lista = prev[turmaId];
-        if (!lista) return prev;
-        return {
-          ...prev,
-          [turmaId]: lista.map((a) =>
-            (a.id || a.nome) === (studentModal.id || studentModal.nome)
-              ? { ...a, cpf: digits }
-              : a
-          ),
-        };
-      });
-      setEditingStudentCpf(false);
-      showToast("CPF atualizado com sucesso!", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao atualizar CPF.");
-    }
-    setSavingStudentCpf(false);
   };
 
   // ── Associar ingresso a um aluno pelo modal ──
@@ -2866,13 +2611,21 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   };
 
   // ─── COMPONENTES REUTILIZÁVEIS INTERNOS ───
+  // Define se "Pendentes" representa quem NÃO entrou (presença) ou quem NÃO pagou (pagamento).
+  // Login brandao/brandao -> "presenca" | Login brandao1/brandao1 -> "pagamento"
+  const modoPendentes = currentUser?.modoPendentes || "pagamento";
+
   const getDetailedList = () => {
     let list =
       dashboardDetailModal === "vendidos"
         ? allTickets.filter((t) => t.pagamentoConfirmado)
         : dashboardDetailModal === "entraram"
         ? allTickets.filter((t) => t.usado)
-        : allTickets.filter((t) => !t.pagamentoConfirmado);
+        : modoPendentes === "presenca"
+        ? // Pendentes = ingressos pagos que ainda não entraram (não marcaram presença)
+          allTickets.filter((t) => t.pagamentoConfirmado && !t.usado)
+        : // Pendentes = ingressos que ainda não foram pagos
+          allTickets.filter((t) => !t.pagamentoConfirmado);
     if (filterYear) list = list.filter((t) => t.ano === filterYear);
     if (filterClass) list = list.filter((t) => t.turma === filterClass);
     return list.sort((a, b) =>
@@ -3350,15 +3103,42 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 />
                 <StatCard
                   title="Pendentes"
-                  val={allTickets.filter((t) => !t.pagamentoConfirmado).length}
+                  val={
+                    (modoPendentes === "presenca"
+                      ? allTickets.filter(
+                          (t) => t.pagamentoConfirmado && !t.usado
+                        )
+                      : allTickets.filter((t) => !t.pagamentoConfirmado)
+                    ).length
+                  }
+                  tot={
+                    modoPendentes === "presenca"
+                      ? allTickets.filter((t) => t.pagamentoConfirmado).length
+                      : undefined
+                  }
                   icon={Clock}
                   pct={
-                    allTickets.length > 0
+                    modoPendentes === "presenca"
+                      ? allTickets.filter((t) => t.pagamentoConfirmado)
+                          .length > 0
+                        ? (allTickets.filter(
+                            (t) => t.pagamentoConfirmado && !t.usado
+                          ).length /
+                            allTickets.filter((t) => t.pagamentoConfirmado)
+                              .length) *
+                          100
+                        : 0
+                      : allTickets.length > 0
                       ? (allTickets.filter((t) => !t.pagamentoConfirmado)
                           .length /
                           allTickets.length) *
                         100
                       : 0
+                  }
+                  sub={
+                    modoPendentes === "presenca"
+                      ? "Não compareceram ao evento"
+                      : "Aguardando pagamento"
                   }
                   bgBar="bg-zinc-600"
                   onClick={() => setDashboardDetailModal("pendentes")}
@@ -4649,7 +4429,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             setImportErrors([]);
                             setImportResult(null);
                             setImportTypeErrors([]);
-                            setImportCpfWarnings([]);
                           }
                         }}
                         className={`flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-bold transition-all ${
@@ -4753,7 +4532,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           accept=".csv,.xlsx"
                           multiple
                           className="hidden"
-                          onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             if (e.target.files && e.target.files.length > 0)
                               handleImportFilesChange(e.target.files);
@@ -4803,8 +4581,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                 setImportErrors([]);
                                 setImportResult(null);
                                 setImportTypeErrors([]);
-                            setImportCpfWarnings([]);
-                                setImportPreviewTurmaTab(null);
                               }}
                               className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
                             >
@@ -4866,192 +4642,106 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       )}
 
                       {/* Preview dos dados */}
-                      {importPreview.length > 0 &&
-                        (() => {
-                          // Agrupa as linhas por turma (ano + turma) para
-                          // exibir em sub-abas em vez de uma lista única
-                          const groupsMap = new Map<
-                            string,
-                            { ano: string; turma: string; rows: typeof importPreview }
-                          >();
-                          importPreview.forEach((row) => {
-                            const ano = row.ano || "—";
-                            const turma = row.turma || "—";
-                            const key = `${ano}|${turma}`;
-                            if (!groupsMap.has(key)) {
-                              groupsMap.set(key, { ano, turma, rows: [] });
-                            }
-                            groupsMap.get(key)!.rows.push(row);
-                          });
-                          const groups = Array.from(groupsMap.entries())
-                            .map(([key, g]) => ({ key, ...g }))
-                            .sort((a, b) => a.key.localeCompare(b.key));
-                          const distinctAnos = new Set(groups.map((g) => g.ano))
-                            .size;
-                          const activeKey =
-                            importPreviewTurmaTab &&
-                            groups.some((g) => g.key === importPreviewTurmaTab)
-                              ? importPreviewTurmaTab
-                              : groups[0]?.key;
-                          const activeGroup =
-                            groups.find((g) => g.key === activeKey) || groups[0];
-                          const rowsToShow = activeGroup
-                            ? activeGroup.rows
-                            : importPreview;
-
-                          return (
-                            <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
-                              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-                                <p className="text-sm font-bold text-white">
-                                  Pré-visualização
-                                </p>
-                                <span className="text-xs text-zinc-500">
-                                  {importPreview.length} registros
-                                </span>
-                              </div>
-
-                              {/* Sub-abas por turma — só aparecem quando há mais de uma turma */}
-                              {groups.length > 1 && (
-                                <div className="flex items-center gap-1.5 px-5 py-3 border-b border-zinc-800 overflow-x-auto">
-                                  {groups.map((g) => {
-                                    const isActive = g.key === activeKey;
-                                    const label =
-                                      distinctAnos > 1
-                                        ? `${g.ano}º${g.turma}`
-                                        : g.turma;
-                                    return (
-                                      <button
-                                        key={g.key}
-                                        onClick={() =>
-                                          setImportPreviewTurmaTab(g.key)
-                                        }
-                                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                          isActive
-                                            ? "bg-white text-black"
-                                            : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
-                                        }`}
-                                      >
-                                        {label}
-                                        <span
-                                          className={`ml-1.5 ${
-                                            isActive
-                                              ? "text-zinc-500"
-                                              : "text-zinc-600"
-                                          }`}
-                                        >
-                                          {g.rows.length}
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-
-                              <div
-                                className="overflow-y-auto"
-                                style={{
-                                  maxHeight: "480px",
-                                  scrollbarWidth: "thin",
-                                  scrollbarColor: "#3f3f46 transparent",
-                                }}
-                              >
-                                <table className="w-full text-sm border-collapse">
-                                  <colgroup>
-                                    <col style={{ width: "40px" }} />
-                                    <col style={{ width: "64px" }} />
-                                    <col style={{ width: "80px" }} />
-                                    <col />
-                                    <col style={{ width: "160px" }} />
-                                    <col style={{ width: "44px" }} />
-                                  </colgroup>
-                                  <thead className="sticky top-0 bg-[#0a0a0a] z-10">
-                                    <tr className="border-b border-zinc-800">
-                                      <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                                        #
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Ano
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Turma
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        Nome
-                                      </th>
-                                      <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
-                                        CPF
-                                      </th>
-                                      <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                      {importPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importPreview.length} registros
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{
+                              maxHeight: "480px",
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#3f3f46 transparent",
+                            }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <colgroup>
+                                <col style={{ width: "40px" }} />
+                                <col style={{ width: "64px" }} />
+                                <col style={{ width: "80px" }} />
+                                <col />
+                                <col style={{ width: "160px" }} />
+                                <col style={{ width: "44px" }} />
+                              </colgroup>
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="border-b border-zinc-800">
+                                  <th className="text-left pl-5 pr-3 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                    #
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Ano
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Turma
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    Nome
+                                  </th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500 border-l border-zinc-800/60">
+                                    CPF
+                                  </th>
+                                  <th className="px-3 py-3 border-l border-zinc-800/60"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importPreview.map((row, i) => {
+                                  const err = validateRow(row, row._row);
+                                  return (
+                                    <tr
+                                      key={i}
+                                      className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
+                                        err ? "bg-red-500/5" : ""
+                                      }`}
+                                    >
+                                      <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
+                                        {i + 1}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.ano || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
+                                        {row.turma || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
+                                        {row.nome || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 font-mono text-zinc-500 text-xs border-l border-zinc-800/40 tabular-nums">
+                                        {row.cpf
+                                          ? `${row.cpf.slice(
+                                              0,
+                                              3
+                                            )}.${row.cpf.slice(
+                                              3,
+                                              6
+                                            )}.${row.cpf.slice(
+                                              6,
+                                              9
+                                            )}-${row.cpf.slice(9)}`
+                                          : "—"}
+                                      </td>
+                                      <td className="px-3 py-3 border-l border-zinc-800/40">
+                                        {err ? (
+                                          <XCircle className="h-3.5 w-3.5 text-red-400/70" />
+                                        ) : (
+                                          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                                        )}
+                                      </td>
                                     </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(() => {
-                                      // Mesmo conjunto de labels usado na lista de avisos
-                                      // (CPF inválido OU duplicado), para que a tabela
-                                      // destaque exatamente os mesmos alunos problemáticos.
-                                      const warnLabelSet = new Set(
-                                        importCpfWarnings.map((w) => w.split(":")[0].trim())
-                                      );
-                                      return rowsToShow.map((row, i) => {
-                                        const { blockingError } = validateRow(row, row._row);
-                                        const err = blockingError;
-                                        const label = `${row.nome} (${row.ano}º ${row.turma})`;
-                                        const warnCpf = !err && warnLabelSet.has(label);
-                                        return (
-                                          <tr
-                                            key={i}
-                                            className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30 transition-colors ${
-                                              err ? "bg-red-500/5" : warnCpf ? "bg-yellow-500/5" : ""
-                                            }`}
-                                          >
-                                            <td className="pl-5 pr-3 py-3 text-[11px] font-mono text-zinc-600 tabular-nums">
-                                              {i + 1}
-                                            </td>
-                                            <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                              {row.ano || "—"}
-                                            </td>
-                                            <td className="px-4 py-3 font-mono text-zinc-400 text-xs border-l border-zinc-800/40">
-                                              {row.turma || "—"}
-                                            </td>
-                                            <td className="px-4 py-3 text-white font-medium border-l border-zinc-800/40">
-                                              {row.nome || "—"}
-                                            </td>
-                                            <td className="px-4 py-3 font-mono text-xs border-l border-zinc-800/40 tabular-nums">
-                                              {warnCpf ? (
-                                                <span className="text-yellow-400/80 line-through">
-                                                  {row.cpf
-                                                    ? `${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`
-                                                    : "—"}
-                                                </span>
-                                              ) : row.cpf ? (
-                                                <span className="text-zinc-500">
-                                                  {`${row.cpf.slice(0,3)}.${row.cpf.slice(3,6)}.${row.cpf.slice(6,9)}-${row.cpf.slice(9)}`}
-                                                </span>
-                                              ) : (
-                                                <span className="text-zinc-700">—</span>
-                                              )}
-                                            </td>
-                                            <td className="px-3 py-3 border-l border-zinc-800/40">
-                                              {err ? (
-                                                <XCircle className="h-3.5 w-3.5 text-red-400/70" />
-                                              ) : warnCpf ? (
-                                                <AlertTriangle className="h-3.5 w-3.5 text-yellow-400/80" />
-                                              ) : (
-                                                <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      });
-                                    })()}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
-                      {/* Erros de validação (bloqueantes) */}
+                      {/* Erros de validação */}
                       {importErrors.length > 0 && (
                         <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
                           <div className="flex items-center gap-2 mb-3">
@@ -5073,28 +4763,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           <p className="text-xs text-zinc-500 mt-3">
                             Corrija os erros no arquivo e reimporte para
                             continuar.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Avisos de CPF inválido ou duplicado (não bloqueantes) */}
-                      {importCpfWarnings.length > 0 && importErrors.length === 0 && (
-                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-5 animate-in fade-in duration-200">
-                          <div className="flex items-center gap-2 mb-3">
-                            <AlertTriangle className="h-4 w-4 text-yellow-400" />
-                            <p className="text-sm font-bold text-yellow-400">
-                              {importCpfWarnings.length} aluno(s) com CPF inválido ou duplicado
-                            </p>
-                          </div>
-                          <ul className="space-y-1 max-h-32 overflow-y-auto">
-                            {importCpfWarnings.map((w, i) => (
-                              <li key={i} className="text-xs text-yellow-300/80 font-mono">
-                                {w}
-                              </li>
-                            ))}
-                          </ul>
-                          <p className="text-xs text-zinc-500 mt-3">
-                            Estes alunos serão importados sem CPF. Você poderá inserir o CPF manualmente depois.
                           </p>
                         </div>
                       )}
@@ -5125,11 +4793,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               </p>
                             </div>
                             <div className="p-4 text-center">
-                              <p className="text-2xl font-black text-yellow-400 tabular-nums">
+                              <p className="text-2xl font-black text-zinc-400 tabular-nums">
                                 {importResult.duplicates}
                               </p>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-1">
-                                Sem CPF (duplicado/inválido)
+                                Duplicatas
                               </p>
                             </div>
                             <div className="p-4 text-center">
@@ -5141,11 +4809,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               </p>
                             </div>
                           </div>
-                          {importResult.duplicates > 0 && (
-                            <p className="text-xs text-yellow-400/80 mt-3">
-                              {importResult.duplicates} aluno{importResult.duplicates !== 1 ? "s" : ""} {importResult.duplicates !== 1 ? "foram cadastrados" : "foi cadastrado"} sem CPF por causa de CPF inválido ou duplicado. Revise e complete o CPF manualmente pelo perfil de cada aluno.
-                            </p>
-                          )}
                           <button
                             onClick={() => {
                               setImportFiles([]);
@@ -5153,8 +4816,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               setImportErrors([]);
                               setImportResult(null);
                               setImportTypeErrors([]);
-                            setImportCpfWarnings([]);
-                              setImportPreviewTurmaTab(null);
                             }}
                             className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
                           >
@@ -5168,13 +4829,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         importErrors.length === 0 &&
                         !importResult && (
                           <button
-                            onClick={() => {
-                              if (importCpfWarnings.length > 0) {
-                                setImportConfirmModal(true);
-                              } else {
-                                handleImportSubmit();
-                              }
-                            }}
+                            onClick={handleImportSubmit}
                             disabled={importLoading}
                             className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
                           >
@@ -5287,7 +4942,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           accept=".csv,.xlsx"
                           multiple
                           className="hidden"
-                          onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             if (e.target.files && e.target.files.length > 0)
                               handleImportParentFilesChange(e.target.files);
@@ -6614,78 +6268,23 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                           ) : (
                             <div className="divide-y divide-zinc-800/50">
                               {/* Header da tabela */}
-                              {(() => {
-                                const semCpfList = alunos.filter(
-                                  (a) => !(a.cpf || "").replace(/\D/g, "")
-                                );
-                                return (
-                                  <div className="grid grid-cols-[32px_1fr_150px_40px] gap-0 px-5 py-3 bg-zinc-900/30">
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                                      #
-                                    </span>
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                                      Nome
-                                    </span>
-                                    <div className="flex items-center gap-1.5 relative">
-                                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                                        CPF
-                                      </span>
-                                      {semCpfList.length > 0 && (
-                                        <div className="relative">
-                                          <button
-                                            onClick={() => setNoCpfPopoverOpen((v) => !v)}
-                                            className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-orange-500/20 transition-colors"
-                                            title={`${semCpfList.length} aluno(s) sem CPF`}
-                                          >
-                                            <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />
-                                          </button>
-                                          {noCpfPopoverOpen && (
-                                            <>
-                                              <div
-                                                className="fixed inset-0 z-[40]"
-                                                onClick={() => setNoCpfPopoverOpen(false)}
-                                              />
-                                              <div className="absolute left-0 top-6 z-[50] w-64 bg-[#111] border border-orange-500/30 rounded-xl shadow-2xl overflow-hidden">
-                                                <div className="flex items-center gap-2 px-3 py-2.5 border-b border-orange-500/20 bg-orange-500/5">
-                                                  <AlertTriangle className="h-3.5 w-3.5 text-orange-400 shrink-0" />
-                                                  <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">
-                                                    {semCpfList.length} aluno{semCpfList.length !== 1 ? "s" : ""} sem CPF
-                                                  </p>
-                                                </div>
-                                                <ul className="max-h-52 overflow-y-auto divide-y divide-zinc-800/60" style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}>
-                                                  {semCpfList.map((a, idx) => (
-                                                    <li key={idx} className="px-3 py-2 flex items-center gap-2">
-                                                      <span className="text-[10px] font-mono text-zinc-600 tabular-nums w-5 shrink-0">
-                                                        {alunos.indexOf(a) + 1}
-                                                      </span>
-                                                      <button
-                                                        onClick={() => {
-                                                          setNoCpfPopoverOpen(false);
-                                                          openStudentModal(a, `${classesYear}${classesClass}`);
-                                                        }}
-                                                        className="text-xs text-zinc-300 hover:text-white text-left truncate transition-colors"
-                                                      >
-                                                        {a.nome}
-                                                      </button>
-                                                    </li>
-                                                  ))}
-                                                </ul>
-                                              </div>
-                                            </>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <span></span>
-                                  </div>
-                                );
-                              })()}
+                              <div className="grid grid-cols-[32px_1fr_150px_40px] gap-0 px-5 py-3 bg-zinc-900/30">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                                  #
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                  Nome
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                  CPF
+                                </span>
+                                <span></span>
+                              </div>
                               {alunos.map((aluno, i) => {
                                 const cpfDigits = (aluno.cpf || "").replace(
                                   /\D/g,
                                   ""
                                 );
-                                const semCpf = !cpfDigits;
                                 const hasTicket = allTickets.some(
                                   (t) =>
                                     (t.cpf || "").replace(/\D/g, "") ===
@@ -6705,12 +6304,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     </span>
                                     <div className="min-w-0 pr-3">
                                       <div className="flex items-center gap-2">
-                                        {semCpf && (
-                                          <AlertTriangle
-                                            className="h-3.5 w-3.5 text-red-500 shrink-0"
-                                            title="Aluno sem CPF cadastrado"
-                                          />
-                                        )}
                                         <p className="text-white font-medium text-sm truncate">
                                           {aluno.nome}
                                         </p>
@@ -6721,16 +6314,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                         )}
                                       </div>
                                     </div>
-                                    <span
-                                      className={`font-mono text-xs tabular-nums ${
-                                        semCpf
-                                          ? "text-red-400 font-semibold"
-                                          : "text-zinc-500"
-                                      }`}
-                                    >
-                                      {semCpf
-                                        ? "sem CPF"
-                                        : formatCpf(aluno.cpf)}
+                                    <span className="text-zinc-500 font-mono text-xs tabular-nums">
+                                      {formatCpf(aluno.cpf)}
                                     </span>
                                     <div className="flex justify-end">
                                       <button
@@ -6865,92 +6450,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       Dados Cadastrais
                     </p>
                     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
-                      {/* CPF — com edição inline, já que alunos importados
-                          sem CPF precisam poder completá-lo aqui */}
-                      <div className="flex items-center justify-between px-4 py-3 gap-3">
-                        <span className="text-zinc-500 text-xs font-semibold shrink-0">
-                          CPF
-                        </span>
-                        {editingStudentCpf ? (
-                          <div className="flex items-center gap-2 flex-1 justify-end">
-                            <input
-                              type="text"
-                              autoFocus
-                              value={editStudentCpfValue}
-                              onChange={(e) => {
-                                setEditStudentCpfValue(
-                                  applyCpfMask(e.target.value)
-                                );
-                                setEditStudentCpfError("");
-                              }}
-                              placeholder="000.000.000-00"
-                              className="w-36 bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-xs font-mono text-white text-right focus:outline-none focus:border-zinc-500"
-                            />
-                            <button
-                              onClick={handleSaveStudentCpf}
-                              disabled={savingStudentCpf}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
-                              title="Salvar"
-                            >
-                              {savingStudentCpf ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <CheckCircle className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => setEditingStudentCpf(false)}
-                              disabled={savingStudentCpf}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-800 transition-colors"
-                              title="Cancelar"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            {!studentModal.cpf && (
-                              <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                            )}
-                            <span
-                              className={`text-xs font-mono ${
-                                studentModal.cpf
-                                  ? "text-white"
-                                  : "text-red-400 font-semibold"
-                              }`}
-                            >
-                              {studentModal.cpf
-                                ? formatCpf(studentModal.cpf)
-                                : "sem CPF"}
-                            </span>
-                            <button
-                              onClick={() => {
-                                setEditStudentCpfValue(
-                                  studentModal.cpf
-                                    ? applyCpfMask(studentModal.cpf)
-                                    : ""
-                                );
-                                setEditStudentCpfError("");
-                                setEditingStudentCpf(true);
-                              }}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
-                              title={
-                                studentModal.cpf
-                                  ? "Editar CPF"
-                                  : "Adicionar CPF"
-                              }
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {editingStudentCpf && editStudentCpfError && (
-                        <p className="text-red-400 text-[11px] px-4 pb-2 -mt-1">
-                          {editStudentCpfError}
-                        </p>
-                      )}
                       {[
+                        { label: "CPF", value: formatCpf(studentModal.cpf) },
                         {
                           label: "E-mail",
                           value: studentModal._userData?.email || null,
@@ -9057,6 +8558,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                   )}
                 </h3>
                 <p className="text-zinc-500 text-sm mt-1">
+                  {dashboardDetailModal === "pendentes" &&
+                    (modoPendentes === "presenca"
+                      ? "Pagos que ainda não entraram · "
+                      : "Ingressos não pagos · ")}
                   Ordem alfabética. Total: {getDetailedList().length}
                 </p>
               </div>
@@ -9354,65 +8859,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             </div>
           );
         })()}
-
-      {/* ── MODAL DE CONFIRMAÇÃO: IMPORTAR COM CPF INVÁLIDO ── */}
-      {importConfirmModal && (
-        <div
-          className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          onClick={() => setImportConfirmModal(false)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-4 px-7 pt-7 pb-5">
-              <div className="w-10 h-10 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                <AlertTriangle className="h-5 w-5 text-yellow-400" />
-              </div>
-              <div>
-                <h3 className="text-white font-bold text-base">
-                  Importar alunos sem CPF?
-                </h3>
-                <p className="text-zinc-400 text-sm mt-1">
-                  {importCpfWarnings.length} aluno{importCpfWarnings.length !== 1 ? "s" : ""} com CPF inválido ou duplicado {importCpfWarnings.length !== 1 ? "serão importados" : "será importado"} sem CPF. Você poderá inserir o CPF manualmente pelo perfil de cada aluno.
-                </p>
-              </div>
-            </div>
-            <div className="mx-7 mb-5 rounded-xl border border-yellow-500/20 bg-yellow-500/5 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-yellow-500/10">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-yellow-500/70">
-                  Alunos que serão importados sem CPF
-                </p>
-              </div>
-              <ul
-                className="divide-y divide-yellow-500/10 max-h-48 overflow-y-auto"
-                style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}
-              >
-                {importCpfWarnings.map((w, i) => (
-                  <li key={i} className="px-4 py-2.5 text-xs text-yellow-300/80 font-mono">
-                    {w}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="flex gap-3 px-7 pb-7">
-              <button
-                onClick={() => setImportConfirmModal(false)}
-                className="flex-1 h-12 rounded-2xl border border-zinc-800 bg-transparent text-zinc-400 text-sm font-semibold hover:bg-zinc-900 hover:text-white transition-all"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleImportSubmit}
-                className="flex-1 h-12 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
-              >
-                <FileUp className="h-4 w-4" />
-                Confirmar importação
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
