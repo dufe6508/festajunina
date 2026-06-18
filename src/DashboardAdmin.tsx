@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Loader2,
@@ -366,11 +367,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [classesData, setClassesData] = useState<Record<string, any[]>>({}); // turmaId -> alunos
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesWithStudents, setClassesWithStudents] = useState<string[]>([]); // turmaIds que têm alunos
+  const [classesWithIncompleteStudents, setClassesWithIncompleteStudents] =
+    useState<string[]>([]); // turmaIds com alunos sem CPF
   const [classesWithStudentsLoading, setClassesWithStudentsLoading] =
     useState(false);
-  const [classesWithIncomplete, setClassesWithIncomplete] = useState<
-    string[]
-  >([]); // turmaIds que têm pelo menos 1 aluno com cadastro incompleto (sem CPF)
   // Modal de aluno
   const [studentModal, setStudentModal] = useState<any | null>(null); // aluno selecionado
   const [studentModalTicket, setStudentModalTicket] = useState<any | null>(
@@ -1127,7 +1127,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setDeleteClassLoading(false);
   };
 
-  // ── Busca quais turmas do ano selecionado têm alunos (e quais têm aluno incompleto) ──
+  // ── Busca quais turmas do ano selecionado têm alunos ──
   const fetchClassesWithStudents = async (ano: string) => {
     setClassesWithStudentsLoading(true);
     try {
@@ -1144,15 +1144,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           );
           if (!snap.empty) {
             withStudents.push(turmaId);
-            const temIncompleto = snap.docs.some(
-              (d) => (d.data().cpf || "").replace(/\D/g, "").length !== 11
-            );
+            const temIncompleto = snap.docs.some((d) => {
+              const data = d.data();
+              const cpf = (data.cpf || "").replace(/\D/g, "");
+              return cpf.length !== 11;
+            });
             if (temIncompleto) withIncomplete.push(turmaId);
           }
         })
       );
       setClassesWithStudents(withStudents.sort());
-      setClassesWithIncomplete(withIncomplete);
+      setClassesWithIncompleteStudents(withIncomplete.sort());
     } catch {
       showToast("Erro ao verificar turmas.");
     }
@@ -6362,8 +6364,6 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             .filter((id) => id.startsWith(classesYear))
                             .map((turmaId) => {
                               const letra = turmaId.slice(1);
-                              const temIncompleto =
-                                classesWithIncomplete.includes(turmaId);
                               return (
                                 <button
                                   key={turmaId}
@@ -6371,13 +6371,10 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     setClassesClass(letra);
                                     fetchClassStudents(turmaId);
                                   }}
-                                  className="group relative bg-[#0a0a0a] border border-zinc-800 rounded-xl p-4 flex flex-col items-center gap-2 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all"
+                                  className="relative group bg-[#0a0a0a] border border-zinc-800 rounded-xl p-4 flex flex-col items-center gap-2 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all"
                                 >
-                                  {temIncompleto && (
-                                    <span
-                                      title="Há aluno(s) com cadastro incompleto nesta turma"
-                                      className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-orange-500 shadow-[0_0_6px_rgba(249,115,22,0.8)]"
-                                    />
+                                  {classesWithIncompleteStudents.includes(turmaId) && (
+                                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-orange-500 rounded-full" />
                                   )}
                                   <span className="text-xl font-black text-white">
                                     {letra}
@@ -9300,3 +9297,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     </div>
   );
 }
+
+export const Route = createFileRoute("/admin")({
+  component: DashboardAdmin,
+});
