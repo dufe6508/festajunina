@@ -1225,6 +1225,7 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (currentUser?.isTest) {
       await handleMpSuccess({
         paymentId: `TESTE-PIX-${Date.now()}`,
+        status: "approved",
         isTest: true,
       });
       setIsPaymentLoading(false);
@@ -1283,6 +1284,7 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (currentUser?.isTest) {
       await handleMpSuccess({
         paymentId: `TESTE-CARTAO-${Date.now()}`,
+        status: "approved",
         isTest: true,
       });
       setIsPaymentLoading(false);
@@ -1332,12 +1334,17 @@ export default function CadastroApp({ onBack = () => {} }) {
       const result = await res.json();
 
       if (result.status === "approved") {
-        await handleMpSuccess({ paymentId: result.id });
+        await handleMpSuccess({ paymentId: result.id, status: "approved" });
       } else if (
         result.status === "in_process" ||
         result.status === "pending"
       ) {
-        await handleMpSuccess({ paymentId: result.id });
+        // Pagamento ainda em análise no Mercado Pago: o ingresso é criado
+        // como pendente (pagamentoConfirmado: false) e não como pago.
+        await handleMpSuccess({ paymentId: result.id, status: result.status });
+        showToast(
+          "Seu pagamento está em análise. O ingresso será confirmado automaticamente quando aprovado."
+        );
       } else {
         showToast(
           result.message ||
@@ -1385,21 +1392,40 @@ export default function CadastroApp({ onBack = () => {} }) {
           ? currentUser.nomeResponsavel || "" // o pai comprando para si
           : currentUser.nomeResponsavel || ""; // vínculo buscado no cadastro
 
+      // Pagamento só é considerado confirmado quando o MP retorna "approved" de fato,
+      // ou quando é um ingresso de teste (bypass). "in_process"/"pending" continuam
+      // pendentes até a confirmação real.
+      const pagamentoConfirmado =
+        !!paymentData?.isTest || paymentData?.status === "approved";
+      const agora = new Date().toISOString();
+
       const ticketData = {
         userId: currentUser.uid,
         nomeAluno:
           currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
         nomeResponsavel: nomeResponsavelIngresso,
+        email: currentUser.email || "",
+        cpf: (currentUser.cpf || "").replace(/\D/g, ""),
         type: purchasedItem.nome, // Salva o nome do lote escolhido
         qty: purchasedItem.qty,
         price: purchasedItem.preco,
         code: uniqueCode,
-        criadoEm: new Date().toISOString(),
+        criadoEm: agora,
         paymentMethod: paymentData?.isTest ? "teste" : "mercadopago",
         mpPaymentId: paymentData?.paymentId || "",
         turma: currentUser.turma || "",
         ano: currentUser.ano || "",
         isTest: !!paymentData?.isTest,
+        origem: paymentData?.isTest ? "manual_admin" : "compra_online",
+        pagamentoConfirmado,
+        dataPagamento: pagamentoConfirmado ? agora : null,
+        metodoPagamento: pagamentoConfirmado
+          ? paymentData?.isTest
+            ? "teste"
+            : "mercadopago"
+          : null,
+        usado: false,
+        horaEntrada: null,
         ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
       };
 
@@ -1467,7 +1493,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       if (status === "approved") {
         setPixStatus("approved");
         clearInterval(interval);
-        await handleMpSuccess({ paymentId: pixData.paymentId });
+        await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
       } else if (status === "rejected" || status === "cancelled") {
         setPixStatus(status);
         clearInterval(interval);
@@ -3386,7 +3412,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                     const status = await checkPixStatus(pixData.paymentId);
                     if (status === "approved") {
                       setPixStatus("approved");
-                      await handleMpSuccess({ paymentId: pixData.paymentId });
+                      await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
                     } else if (
                       status === "rejected" ||
                       status === "cancelled"
