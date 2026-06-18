@@ -386,6 +386,20 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [studentModalResponsaveis, setStudentModalResponsaveis] = useState<
     any[]
   >([]);
+  // Edição de dados cadastrais do aluno no modal
+  const [editStudentMode, setEditStudentMode] = useState(false);
+  const [editStudentForm, setEditStudentForm] = useState({
+    cpf: "",
+    email: "",
+    telefone: "",
+  });
+  const [editStudentSaving, setEditStudentSaving] = useState(false);
+  const [editStudentError, setEditStudentError] = useState("");
+  // Modal: lista de alunos sem CPF da turma
+  const [missingCpfModal, setMissingCpfModal] = useState<{
+    turmaId: string;
+    alunos: any[];
+  } | null>(null);
 
   // Estados: Responsáveis
   const [responsavelSearch, setResponsavelSearch] = useState("");
@@ -1139,6 +1153,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     setStudentModal({ ...aluno, turmaId });
     setStudentModalTicket(null);
     setStudentModalResponsaveis([]);
+    setEditStudentMode(false);
+    setEditStudentError("");
     setStudentModalLoading(true);
     setAssociarForm({
       loteId: "",
@@ -1311,6 +1327,60 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       showToast("Erro ao excluir ingresso.");
     }
     setStudentModalLoading(false);
+  };
+
+  // ── Salvar edição de dados cadastrais do aluno ──
+  const handleSaveStudentEdit = async () => {
+    if (!studentModal) return;
+    setEditStudentError("");
+    const cpfDigits = editStudentForm.cpf.replace(/\D/g, "");
+    if (cpfDigits && !validateCpfFull(editStudentForm.cpf)) {
+      setEditStudentError("CPF inválido");
+      return;
+    }
+    if (
+      editStudentForm.email &&
+      !/^\S+@\S+\.\S+$/.test(editStudentForm.email)
+    ) {
+      setEditStudentError("E-mail inválido");
+      return;
+    }
+    setEditStudentSaving(true);
+    try {
+      const turmaId = studentModal.turmaId;
+      const nomeId = studentModal.id;
+      const updates: any = {
+        cpf: cpfDigits,
+        email: editStudentForm.email.trim(),
+        telefone: editStudentForm.telefone.trim(),
+      };
+      await updateDoc(doc(db, "alunos", turmaId, "lista", nomeId), updates);
+      // Atualiza estado local
+      setStudentModal((prev: any) => ({ ...prev, ...updates }));
+      setClassesData((prev) => {
+        const n = { ...prev };
+        if (n[turmaId]) {
+          n[turmaId] = n[turmaId].map((a) =>
+            a.id === nomeId ? { ...a, ...updates } : a
+          );
+        }
+        return n;
+      });
+      // Atualiza lista do modal "sem CPF" se aberto
+      setMissingCpfModal((prev) => {
+        if (!prev) return prev;
+        const filtered = prev.alunos
+          .map((a) => (a.id === nomeId ? { ...a, ...updates } : a))
+          .filter((a) => (a.cpf || "").replace(/\D/g, "").length !== 11);
+        return { ...prev, alunos: filtered };
+      });
+      setEditStudentMode(false);
+      showToast("Dados atualizados com sucesso!", "success");
+    } catch (e) {
+      console.error(e);
+      setEditStudentError("Erro ao salvar. Tente novamente.");
+    }
+    setEditStudentSaving(false);
   };
 
   // ── Excluir aluno do Firebase ──
@@ -6327,6 +6397,33 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               {classesLoading && (
                                 <Loader2 className="h-4 w-4 text-zinc-500 animate-spin" />
                               )}
+                              {alunos &&
+                                alunos.length > 0 &&
+                                (() => {
+                                  const semCpf = alunos.filter(
+                                    (a) =>
+                                      (a.cpf || "").replace(/\D/g, "")
+                                        .length !== 11
+                                  );
+                                  if (semCpf.length === 0) return null;
+                                  return (
+                                    <button
+                                      onClick={() =>
+                                        setMissingCpfModal({
+                                          turmaId,
+                                          alunos: semCpf,
+                                        })
+                                      }
+                                      title={`${semCpf.length} aluno(s) sem CPF`}
+                                      className="h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-all"
+                                    >
+                                      <AlertTriangle className="h-4 w-4" />
+                                      <span className="text-xs font-bold tabular-nums">
+                                        {semCpf.length}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
                               {alunos && alunos.length > 0 && (
                                 <button
                                   onClick={() => setConfirmDeleteClass(turmaId)}
@@ -6370,15 +6467,18 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                   /\D/g,
                                   ""
                                 );
-                                const hasTicket = allTickets.some(
-                                  (t) =>
-                                    (t.cpf || "").replace(/\D/g, "") ===
-                                      cpfDigits ||
-                                    (usersMap[t.userId] || "").replace(
-                                      /\D/g,
-                                      ""
-                                    ) === cpfDigits
-                                );
+                                const cpfMissing = cpfDigits.length !== 11;
+                                const hasTicket =
+                                  !cpfMissing &&
+                                  allTickets.some(
+                                    (t) =>
+                                      (t.cpf || "").replace(/\D/g, "") ===
+                                        cpfDigits ||
+                                      (usersMap[t.userId] || "").replace(
+                                        /\D/g,
+                                        ""
+                                      ) === cpfDigits
+                                  );
                                 return (
                                   <div
                                     key={aluno.id || i}
@@ -6389,6 +6489,22 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                                     </span>
                                     <div className="min-w-0 pr-3">
                                       <div className="flex items-center gap-2">
+                                        {cpfMissing && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openStudentModal(
+                                                aluno,
+                                                `${classesYear}${classesClass}`
+                                              );
+                                            }}
+                                            title="Aluno sem CPF — clique para editar"
+                                            className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 transition-colors"
+                                          >
+                                            <AlertTriangle className="h-3 w-3" />
+                                          </button>
+                                        )}
                                         <p className="text-white font-medium text-sm truncate">
                                           {aluno.nome}
                                         </p>
@@ -6480,6 +6596,69 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         </div>
       )}
 
+      {/* ── MODAL: ALUNOS SEM CPF DA TURMA ── */}
+      {missingCpfModal && (
+        <div
+          className="fixed inset-0 z-[115] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setMissingCpfModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
+                  <AlertTriangle className="h-5 w-5 text-orange-400" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">
+                    Alunos sem CPF
+                  </p>
+                  <p className="text-zinc-500 text-xs mt-0.5">
+                    {missingCpfModal.alunos.length} aluno(s) — Turma{" "}
+                    {missingCpfModal.turmaId}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMissingCpfModal(null)}
+                className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 space-y-2">
+              {missingCpfModal.alunos.length === 0 ? (
+                <div className="py-10 text-center text-zinc-500 flex flex-col items-center gap-2">
+                  <CheckCircle className="h-8 w-8 text-green-400" />
+                  <p className="text-sm">Todos os alunos têm CPF cadastrado.</p>
+                </div>
+              ) : (
+                missingCpfModal.alunos.map((aluno) => (
+                  <button
+                    key={aluno.id}
+                    onClick={() => {
+                      setMissingCpfModal(null);
+                      openStudentModal(aluno, missingCpfModal.turmaId);
+                    }}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-orange-500/30 hover:bg-orange-500/5 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0" />
+                      <span className="text-white text-sm font-medium truncate">
+                        {aluno.nome}
+                      </span>
+                    </div>
+                    <Pencil className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL DO ALUNO ── */}
       {studentModal && (
         <div
@@ -6531,49 +6710,197 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 <>
                   {/* Dados cadastrais */}
                   <div className="space-y-3">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                      Dados Cadastrais
-                    </p>
-                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
-                      {[
-                        { label: "CPF", value: formatCpf(studentModal.cpf) },
-                        {
-                          label: "E-mail",
-                          value: studentModal._userData?.email || null,
-                        },
-                        {
-                          label: "Telefone",
-                          value:
-                            studentModal._userData?.telefone ||
-                            studentModal._userData?.phone ||
-                            null,
-                        },
-                        {
-                          label: "Importado em",
-                          value: studentModal.cadastradoEm
-                            ? new Date(
-                                studentModal.cadastradoEm
-                              ).toLocaleDateString("pt-BR")
-                            : null,
-                        },
-                      ].map(({ label, value }) => (
-                        <div
-                          key={label}
-                          className="flex items-center justify-between px-4 py-3"
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                        Dados Cadastrais
+                      </p>
+                      {!editStudentMode ? (
+                        <button
+                          onClick={() => {
+                            setEditStudentError("");
+                            setEditStudentForm({
+                              cpf: formatCpf(studentModal.cpf || "") === "—" ? "" : formatCpf(studentModal.cpf || ""),
+                              email:
+                                studentModal.email ||
+                                studentModal._userData?.email ||
+                                "",
+                              telefone:
+                                studentModal.telefone ||
+                                studentModal._userData?.telefone ||
+                                studentModal._userData?.phone ||
+                                "",
+                            });
+                            setEditStudentMode(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 hover:bg-zinc-900 text-[11px] font-bold transition-colors"
                         >
-                          <span className="text-zinc-500 text-xs font-semibold">
-                            {label}
-                          </span>
-                          <span
-                            className={`text-xs font-mono ${
-                              value ? "text-white" : "text-zinc-700 italic"
-                            }`}
-                          >
-                            {value || "não informado"}
-                          </span>
-                        </div>
-                      ))}
+                          <Pencil className="h-3 w-3" /> Editar
+                        </button>
+                      ) : null}
                     </div>
+                    {!editStudentMode ? (
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                        {[
+                          {
+                            label: "CPF",
+                            value:
+                              (studentModal.cpf || "").replace(/\D/g, "")
+                                .length === 11
+                                ? formatCpf(studentModal.cpf)
+                                : null,
+                            warn:
+                              (studentModal.cpf || "").replace(/\D/g, "")
+                                .length !== 11,
+                          },
+                          {
+                            label: "E-mail",
+                            value:
+                              studentModal.email ||
+                              studentModal._userData?.email ||
+                              null,
+                          },
+                          {
+                            label: "Telefone",
+                            value:
+                              studentModal.telefone ||
+                              studentModal._userData?.telefone ||
+                              studentModal._userData?.phone ||
+                              null,
+                          },
+                          {
+                            label: "Importado em",
+                            value: studentModal.cadastradoEm
+                              ? new Date(
+                                  studentModal.cadastradoEm
+                                ).toLocaleDateString("pt-BR")
+                              : null,
+                          },
+                        ].map(({ label, value, warn }: any) => (
+                          <div
+                            key={label}
+                            className="flex items-center justify-between px-4 py-3"
+                          >
+                            <span className="text-zinc-500 text-xs font-semibold flex items-center gap-1.5">
+                              {warn && (
+                                <AlertTriangle className="h-3 w-3 text-orange-400" />
+                              )}
+                              {label}
+                            </span>
+                            <span
+                              className={`text-xs font-mono ${
+                                value
+                                  ? "text-white"
+                                  : warn
+                                    ? "text-orange-400 italic"
+                                    : "text-zinc-700 italic"
+                              }`}
+                            >
+                              {value || (warn ? "sem CPF" : "não informado")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                            CPF
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={editStudentForm.cpf}
+                            onChange={(e) =>
+                              setEditStudentForm((p) => ({
+                                ...p,
+                                cpf: applyCpfMask(e.target.value),
+                              }))
+                            }
+                            placeholder="000.000.000-00"
+                            className="mt-1 w-full h-10 bg-black/40 border border-zinc-800 rounded-xl px-3 text-white text-sm font-mono focus:outline-none focus:border-zinc-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                            E-mail
+                          </label>
+                          <input
+                            type="email"
+                            value={editStudentForm.email}
+                            onChange={(e) =>
+                              setEditStudentForm((p) => ({
+                                ...p,
+                                email: e.target.value,
+                              }))
+                            }
+                            placeholder="email@exemplo.com"
+                            className="mt-1 w-full h-10 bg-black/40 border border-zinc-800 rounded-xl px-3 text-white text-sm focus:outline-none focus:border-zinc-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                            Telefone
+                          </label>
+                          <input
+                            type="tel"
+                            value={editStudentForm.telefone}
+                            onChange={(e) => {
+                              const c = e.target.value
+                                .replace(/\D/g, "")
+                                .slice(0, 11);
+                              let v = c;
+                              if (c.length > 6)
+                                v = c.replace(
+                                  /^(\d{2})(\d{5})(\d{0,4})/,
+                                  "($1) $2-$3"
+                                );
+                              else if (c.length > 2)
+                                v = c.replace(
+                                  /^(\d{2})(\d{0,5})/,
+                                  "($1) $2"
+                                );
+                              else if (c.length) v = `(${c}`;
+                              setEditStudentForm((p) => ({
+                                ...p,
+                                telefone: v,
+                              }));
+                            }}
+                            placeholder="(00) 00000-0000"
+                            className="mt-1 w-full h-10 bg-black/40 border border-zinc-800 rounded-xl px-3 text-white text-sm focus:outline-none focus:border-zinc-600"
+                          />
+                        </div>
+                        {editStudentError && (
+                          <div className="flex items-center gap-2 text-orange-400 text-xs font-semibold">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            {editStudentError}
+                          </div>
+                        )}
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              setEditStudentMode(false);
+                              setEditStudentError("");
+                            }}
+                            disabled={editStudentSaving}
+                            className="flex-1 h-10 rounded-xl border border-zinc-800 text-zinc-400 text-xs font-bold hover:bg-zinc-900 hover:text-white transition-all disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={handleSaveStudentEdit}
+                            disabled={editStudentSaving}
+                            className="flex-1 h-10 rounded-xl bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                          >
+                            {editStudentSaving ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle className="h-3.5 w-3.5" />
+                            )}
+                            Salvar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {/* Status de login */}
                     <div
                       className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold ${
