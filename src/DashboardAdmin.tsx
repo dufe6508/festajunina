@@ -290,6 +290,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [batchModal, setBatchModal] = useState(null); // Criação/Edição de lote
   const [confirmVisibilityModal, setConfirmVisibilityModal] = useState(null); // Ocultar/Exibir lote
+  const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(null); // Excluir lote
+  const [deletingBatch, setDeletingBatch] = useState(false);
 
   // Estados: Busca de aluno no formulário de adicionar ingresso
   const [addTicketStudentSearch, setAddTicketStudentSearch] = useState("");
@@ -4311,6 +4313,9 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                     const vendidos = (allTickets || []).filter(
                       (t) => t.pagamentoConfirmado && t.type === batch.nome
                     ).length;
+                    const totalNaDB = (allTickets || []).filter(
+                      (t) => t.type === batch.nome
+                    ).length;
                     const limite = Number(batch.quantidade) || 0;
                     const pct = limite > 0 ? Math.min(100, (vendidos / limite) * 100) : 0;
                     const esgotado = limite > 0 && vendidos >= limite;
@@ -4370,7 +4375,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                         {/* Pills de info */}
                         <div className="flex flex-wrap gap-1.5">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
-                            <Ticket className="w-3 h-3" /> {batch.quantidade}{" "}
+                            <Ticket className="w-3 h-3" /> {totalNaDB}/{batch.quantidade}{" "}
                             ingressos
                           </span>
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
@@ -4494,6 +4499,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                             ) : (
                               <AiOutlineEyeInvisible size={15} />
                             )}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteBatch(batch)}
+                            title="Excluir lote"
+                            className="h-9 w-9 flex items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-all shrink-0"
+                          >
+                            <Trash2 size={15} />
                           </button>
 
                         </div>
@@ -9286,6 +9298,68 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
             </div>
           );
         })()}
+
+      {/* ── MODAL: CONFIRMAR EXCLUSÃO DE LOTE ── */}
+      {confirmDeleteBatch && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => !deletingBatch && setConfirmDeleteBatch(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200 p-7 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-base">Excluir Lote</h3>
+                <p className="text-zinc-500 text-xs mt-0.5">Esta ação não pode ser desfeita</p>
+              </div>
+            </div>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              Tem certeza que deseja excluir o lote{" "}
+              <span className="text-white font-semibold">"{confirmDeleteBatch.nome}"</span>?
+              {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length > 0 && (
+                <span className="block mt-2 text-amber-400 text-xs font-semibold">
+                  ⚠ Atenção: existem{" "}
+                  {(allTickets || []).filter((t) => t.type === confirmDeleteBatch.nome).length}{" "}
+                  ingresso(s) vinculado(s) a este lote.
+                </span>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmDeleteBatch(null)}
+                disabled={deletingBatch}
+                className="flex-1 h-11 rounded-xl border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  setDeletingBatch(true);
+                  try {
+                    await deleteDoc(doc(db, "lotes", confirmDeleteBatch.id));
+                    setBatches((prev) => prev.filter((b) => b.id !== confirmDeleteBatch.id));
+                    setConfirmDeleteBatch(null);
+                    showToast("Lote excluído com sucesso.", "success");
+                  } catch {
+                    showToast("Erro ao excluir lote.");
+                  }
+                  setDeletingBatch(false);
+                }}
+                disabled={deletingBatch}
+                className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {deletingBatch && <Loader2 className="h-4 w-4 animate-spin" />}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white border border-zinc-800 shadow-2xl rounded-xl p-4 flex items-center gap-3 z-[150]">
