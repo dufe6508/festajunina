@@ -33,6 +33,8 @@ import { IoMdDownload } from "react-icons/io";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -87,6 +89,9 @@ const firebaseConfig = {
 // Inicialização
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch((err) =>
+  console.error("Erro ao configurar persistência de login:", err)
+);
 const db = getFirestore(app);
 
 // Chave usada no localStorage para lembrar que o usuário já está logado,
