@@ -661,6 +661,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     return { ano: m[1], turma: m[2].toUpperCase() };
   };
 
+  // Tenta extrair "ano" e "turma" a partir do NOME DA ABA (ex: aba
+  // chamada "1ºJ", "1J", "1º J - Manhã"), usado como fallback quando o
+  // cabeçalho de "Nível de Ensino" dentro da planilha não foi reconhecido.
+  const parseAnoTurmaFromSheetName = (
+    sheetName: string
+  ): { ano: string; turma: string } | null => {
+    return parseAnoTurmaFromHeaderText(sheetName);
+  };
+
   // Detecta se uma aba está no formato "institucional" da escola:
   // linhas de cabeçalho fixas (escola, título, nível/série/turno) seguidas
   // de uma linha "Nº | Nome | | CPF" e então os alunos.
@@ -711,7 +720,16 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       }
     }
 
-    if (headerRowIdx === -1 || !ano || !turma) return null;
+    // A aba não tem a tabela institucional (Nº/Nome/CPF) — não é esse
+    // formato, deixa o caller tentar o formato genérico.
+    if (headerRowIdx === -1) return null;
+
+    // A tabela existe, mas não conseguimos achar ano/turma no texto do
+    // cabeçalho. Isso NÃO deve cair no parser genérico (ele espera uma
+    // planilha totalmente diferente, com cabeçalho de colunas na linha
+    // 1) — isso gerava as linhas "fantasma" (tudo "—") vistas no bug.
+    // Em vez disso, retornamos ano/turma vazios e deixamos o caller
+    // decidir (ex: tentar extrair do nome da aba, ou avisar e pular).
     return { ano, turma, dataStartRow: headerRowIdx + 1 };
   };
 
@@ -725,12 +743,15 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
   //  2) "Genérico": primeira linha com cabeçalho de colunas
   //     (ano, turma, nome, cpf) — comportamento legado, mantido para
   //     planilhas simples de uma aba só.
-  const parseFile = async (file: File): Promise<any[]> => {
+  const parseFile = async (
+    file: File
+  ): Promise<{ rows: any[]; unrecognizedSheets: string[] }> => {
     const XLSX = await loadXLSX();
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: "array", raw: false });
 
     const allRows: any[] = [];
+    const unrecognizedSheets: string[] = [];
 
     for (const sheetName of wb.SheetNames) {
       const ws = wb.Sheets[sheetName];
@@ -743,8 +764,31 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       const schoolFormat = detectSchoolSheetFormat(raw);
 
       if (schoolFormat) {
+        let { ano, turma } = schoolFormat;
+        const { dataStartRow } = schoolFormat;
+
+        // O cabeçalho "Nível de Ensino" não trouxe ano/turma reconhecíveis.
+        // Em vez de tratar a aba como planilha genérica (o que gerava
+        // linhas "fantasma" com tudo "—"), tentamos extrair ano/turma do
+        // próprio NOME DA ABA — padrão comum em exports escolares (aba
+        // chamada "1ºJ", "1J", etc).
+        if (!ano || !turma) {
+          const fromSheetName = parseAnoTurmaFromSheetName(sheetName);
+          if (fromSheetName) {
+            ano = fromSheetName.ano;
+            turma = fromSheetName.turma;
+          }
+        }
+
+        // Ainda sem ano/turma: não há como importar esses alunos
+        // corretamente. Pular a aba inteira e avisar o usuário, em vez
+        // de gerar registros inválidos na pré-visualização.
+        if (!ano || !turma) {
+          unrecognizedSheets.push(sheetName);
+          continue;
+        }
+
         // Formato institucional: colunas fixas Nº(0) | Nome(2) | CPF(3)
-        const { ano, turma, dataStartRow } = schoolFormat;
         for (let i = dataStartRow; i < raw.length; i++) {
           const row = raw[i] || [];
           // Nome deve vir exclusivamente da coluna 2 (col "Nome" do
@@ -802,7 +846,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       allRows.push(...genericRows);
     }
 
-    return allRows;
+    return { rows: allRows, unrecognizedSheets };
   };
 
   // Normaliza os dados para o formato esperado: nome, turma, ano, cpf
@@ -896,9 +940,21 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
 
     try {
       const allRows: any[] = [];
+      const allUnrecognizedSheets: string[] = [];
       for (const file of valid) {
-        const rows = await parseFile(file);
+        const { rows, unrecognizedSheets } = await parseFile(file);
         allRows.push(...rows);
+        allUnrecognizedSheets.push(...unrecognizedSheets);
+      }
+
+      if (allUnrecognizedSheets.length > 0) {
+        setImportTypeErrors((prev) => [
+          ...prev,
+          ...allUnrecognizedSheets.map(
+            (name) =>
+              `Aba "${name}" ignorada: não foi possível identificar o ano/turma. Verifique se o cabeçalho da aba contém a série (ex: "1º A") ou renomeie a aba para esse padrão.`
+          ),
+        ]);
       }
 
       if (allRows.length === 0) {
@@ -1108,7 +1164,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     try {
       const allRows: any[] = [];
       for (const file of valid) {
-        const rows = await parseFile(file);
+        const { rows } = await parseFile(file);
         allRows.push(...rows);
       }
       if (allRows.length === 0) {
