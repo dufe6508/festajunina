@@ -604,7 +604,9 @@ export default function CadastroApp({ onBack = () => {} }) {
       });
 
       // Ordenação simples por nome
-      setBatches(list.sort((a, b) => a.nome.localeCompare(b.nome)));
+      setBatches(
+        list.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+      );
     } catch (err) {
       showToast("Erro ao carregar lotes disponíveis.");
     }
@@ -612,9 +614,9 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
 
-  const showToast = (message, type = "error", extra = {}) => {
-    setToast({ message, type, ...extra });
-    setTimeout(() => setToast(null), 6000);
+  const showToast = (message, type = "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
   };
 
   const applyPhoneMask = (v) => {
@@ -884,33 +886,9 @@ export default function CadastroApp({ onBack = () => {} }) {
       await signInWithEmailAndPassword(auth, formData.email, formData.senha);
     } catch (error) {
       setIsLoading(false);
-
-      // Conta criada com Google — não tem senha própria
-      if (
-        error.code === "auth/wrong-password" ||
-        error.code === "auth/invalid-credential" ||
-        error.code === "auth/invalid-login-credentials"
-      ) {
-        // Verifica se o e-mail pertence a uma conta Google
-        try {
-          const methods = await fetchSignInMethodsForEmail(auth, formData.email);
-          if (methods.includes("google.com")) {
-            showToast(
-              "Esta conta foi criada com o Google. Use o botão abaixo para entrar.",
-              "error",
-              { isGoogleAccount: true }
-            );
-            return;
-          }
-        } catch {}
-        showToast("E-mail ou senha incorretos.");
-        return;
-      }
-
       let msg = "E-mail ou senha incorretos.";
       if (error.code === "auth/user-not-found") msg = "Usuário não encontrado.";
-      if (error.code === "auth/too-many-requests")
-        msg = "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
+      if (error.code === "auth/wrong-password") msg = "Senha incorreta.";
       showToast(msg);
     }
   };
@@ -1648,19 +1626,9 @@ export default function CadastroApp({ onBack = () => {} }) {
             <GoogleIcon /> Entrar com Google
           </Button>
           {toast && (
-            <div className="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-              <div className="space-y-2">
-                <p>{toast.message}</p>
-                {toast.isGoogleAccount && (
-                  <button
-                    onClick={handleGoogleLogin}
-                    className="flex items-center gap-2 mt-1 bg-white text-black text-xs font-bold px-3 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
-                  >
-                    <GoogleIcon /> Entrar com Google
-                  </button>
-                )}
-              </div>
+            <div className="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              {toast.message}
             </div>
           )}
         </div>
@@ -2543,7 +2511,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                         const vendidos = Number(batch.vendidos) || 0;
                         const restantes = Math.max(0, limite - vendidos);
                         const pct = limite > 0 ? Math.min(100, (vendidos / limite) * 100) : 0;
-                        const esgotado = batch.esgotado === true || (limite > 0 && vendidos >= limite);
+                        const esgotado = limite > 0 && vendidos >= limite;
                         const bloqueado = !!batch.bloqueadoParaAluno;
                         const indisponivel = esgotado || bloqueado;
                         return (
@@ -2586,13 +2554,6 @@ export default function CadastroApp({ onBack = () => {} }) {
                                   .toFixed(2)
                                   .replace(".", ",")}
                               </p>
-
-                              {esgotado && !bloqueado && (
-                                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
-                                  <AlertCircle className="h-5 w-5 shrink-0" />
-                                  Este lote foi esgotado. Fique de olho em novos lotes!
-                                </div>
-                              )}
 
                                {purchasedTickets.length > 0 && (
                                 <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
@@ -3237,9 +3198,48 @@ export default function CadastroApp({ onBack = () => {} }) {
                     </div>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(pixData.qrCode);
-                        setPixCopied(true);
-                        setTimeout(() => setPixCopied(false), 2500);
+                        const copyFallback = (text) => {
+                          try {
+                            const ta = document.createElement("textarea");
+                            ta.value = text;
+                            ta.style.position = "fixed";
+                            ta.style.opacity = "0";
+                            document.body.appendChild(ta);
+                            ta.focus();
+                            ta.select();
+                            document.execCommand("copy");
+                            document.body.removeChild(ta);
+                            return true;
+                          } catch (e) {
+                            return false;
+                          }
+                        };
+
+                        if (navigator.clipboard?.writeText) {
+                          navigator.clipboard
+                            .writeText(pixData.qrCode)
+                            .then(() => {
+                              setPixCopied(true);
+                              setTimeout(() => setPixCopied(false), 2500);
+                            })
+                            .catch(() => {
+                              if (copyFallback(pixData.qrCode)) {
+                                setPixCopied(true);
+                                setTimeout(() => setPixCopied(false), 2500);
+                              } else {
+                                showToast(
+                                  "Não foi possível copiar. Selecione o código manualmente."
+                                );
+                              }
+                            });
+                        } else if (copyFallback(pixData.qrCode)) {
+                          setPixCopied(true);
+                          setTimeout(() => setPixCopied(false), 2500);
+                        } else {
+                          showToast(
+                            "Não foi possível copiar. Selecione o código manualmente."
+                          );
+                        }
                       }}
                       className="bg-[#F7F7F7] border border-[#EEEEEE] rounded-xl px-4 flex items-center justify-center text-[#009EE3] hover:bg-[#EEF8FD] hover:border-[#009EE3] transition"
                     >
