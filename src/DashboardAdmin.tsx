@@ -417,6 +417,27 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
     alunos: any[];
   } | null>(null);
 
+  // ── Modal: Associar ingressos em massa (vários alunos de uma turma) ──
+  const [bulkTicketModal, setBulkTicketModal] = useState<{
+    turmaId: string;
+    alunos: any[];
+  } | null>(null);
+  const [bulkTicketSelected, setBulkTicketSelected] = useState<Set<string>>(
+    new Set()
+  );
+  const [bulkTicketSearch, setBulkTicketSearch] = useState("");
+  const [bulkTicketForm, setBulkTicketForm] = useState({
+    loteId: "",
+    status: "pendente" as "pendente" | "validado", // "validado" = válido/já entrou
+    pago: false,
+    metodoPagamento: null as "dinheiro" | null,
+  });
+  const [bulkTicketLoading, setBulkTicketLoading] = useState(false);
+  const [bulkTicketResult, setBulkTicketResult] = useState<{
+    criados: number;
+    ignorados: number;
+  } | null>(null);
+
   // Estados: Responsáveis
   const [responsavelSearch, setResponsavelSearch] = useState("");
   const [responsavelResults, setResponsavelResults] = useState<any[]>([]);
@@ -1407,6 +1428,161 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
       showToast("Erro ao excluir ingresso.");
     }
     setStudentModalLoading(false);
+  };
+
+  // ── Abre o modal de associação de ingressos em massa para uma turma ──
+  const openBulkTicketModal = (turmaId: string, alunos: any[]) => {
+    setBulkTicketModal({ turmaId, alunos });
+    setBulkTicketSelected(new Set());
+    setBulkTicketSearch("");
+    setBulkTicketResult(null);
+    setBulkTicketForm({
+      loteId: "",
+      status: "pendente",
+      pago: false,
+      metodoPagamento: null,
+    });
+  };
+
+  // Verifica se um aluno já possui ingresso (mesma lógica usada na listagem da turma)
+  const alunoJaTemIngresso = (aluno: any) => {
+    const cpfDigits = (aluno.cpf || "").replace(/\D/g, "");
+    if (!cpfDigits) return false;
+    return allTickets.some(
+      (t) =>
+        (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
+        (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+    );
+  };
+
+  const toggleBulkTicketSelect = (alunoKey: string) => {
+    setBulkTicketSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(alunoKey)) next.delete(alunoKey);
+      else next.add(alunoKey);
+      return next;
+    });
+  };
+
+  const toggleBulkTicketSelectAll = (alunosDisponiveis: any[]) => {
+    setBulkTicketSelected((prev) => {
+      const keys = alunosDisponiveis.map(
+        (a, i) => a.id || `${a.nome}_${i}`
+      );
+      const todosSelecionados = keys.every((k) => prev.has(k));
+      if (todosSelecionados) return new Set();
+      return new Set(keys);
+    });
+  };
+
+  // ── Associa um ingresso (mesmo tipo/lote) a vários alunos selecionados de uma vez ──
+  const handleBulkAssociarIngressos = async () => {
+    if (!bulkTicketModal || !bulkTicketForm.loteId) return;
+    if (bulkTicketSelected.size === 0) return;
+    setBulkTicketLoading(true);
+    try {
+      const loteSelecionado = batches.find(
+        (b) => b.id === bulkTicketForm.loteId
+      );
+      const usado = bulkTicketForm.status === "validado";
+      const novosTickets: any[] = [];
+      let criados = 0;
+      let ignorados = 0;
+
+      const alunosSelecionados = bulkTicketModal.alunos.filter((a, i) =>
+        bulkTicketSelected.has(a.id || `${a.nome}_${i}`)
+      );
+
+      for (const aluno of alunosSelecionados) {
+        // Pula alunos que já possuem ingresso, para não duplicar
+        if (alunoJaTemIngresso(aluno)) {
+          ignorados++;
+          continue;
+        }
+        const cpfDigits = (aluno.cpf || "").replace(/\D/g, "");
+        const userId = cpfDigits
+          ? await findUserIdByCpf(db, cpfDigits)
+          : null;
+        const uniqueCode = await generateTicketCode(db);
+        const agora = new Date().toISOString();
+        const ticketData = {
+          userId: userId || `manual_${uniqueCode}`,
+          nomeAluno: aluno.nome,
+          ano: aluno.ano,
+          turma: aluno.turma,
+          type: loteSelecionado?.nome || "Acesso Geral",
+          loteId: loteSelecionado?.id || null,
+          qty: 1,
+          price: loteSelecionado?.preco || 0,
+          code: uniqueCode,
+          criadoEm: agora,
+          usado,
+          horaEntrada: usado ? agora : null,
+          cpf: aluno.cpf || "",
+          email: "",
+          origem: "manual_admin_bulk",
+          pagamentoConfirmado: bulkTicketForm.pago,
+          dataPagamento: bulkTicketForm.pago ? agora : null,
+          metodoPagamento: bulkTicketForm.pago
+            ? bulkTicketForm.metodoPagamento === "dinheiro"
+              ? "dinheiro"
+              : "pix"
+            : null,
+        };
+        await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+        novosTickets.push({ id: uniqueCode, ...ticketData });
+        criados++;
+      }
+
+      // Contabiliza todos os ingressos criados de uma vez no contador do lote
+      // (mesmo contador usado pela leitura/dashboards e pela tela de Lotes)
+      if (loteSelecionado?.id && criados > 0) {
+        try {
+          await updateDoc(doc(db, "lotes", loteSelecionado.id), {
+            ingressosAssociados: increment(criados),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === loteSelecionado.id
+                ? {
+                    ...b,
+                    ingressosAssociados:
+                      (b.ingressosAssociados || 0) + criados,
+                  }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao incrementar contador do lote:", e);
+        }
+      }
+
+      // Atualiza a lista de ingressos em memória (contabilizado também nas
+      // dashboards/relatórios, que leem a partir de allTickets)
+      if (novosTickets.length > 0) {
+        setAllTickets((prev) =>
+          [...prev, ...novosTickets].sort((a, b) =>
+            (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
+          )
+        );
+      }
+
+      setBulkTicketResult({ criados, ignorados });
+      setBulkTicketSelected(new Set());
+      showToast(
+        criados > 0
+          ? `${criados} ingresso(s) associado(s) com sucesso!${
+              ignorados > 0
+                ? ` (${ignorados} ignorado(s) — já tinham ingresso)`
+                : ""
+            }`
+          : "Nenhum ingresso criado — todos os alunos selecionados já possuíam ingresso.",
+        criados > 0 ? "success" : undefined
+      );
+    } catch {
+      showToast("Erro ao associar ingressos em massa.");
+    }
+    setBulkTicketLoading(false);
   };
 
   // ── Salvar edição de dados cadastrais do aluno ──
@@ -6577,6 +6753,17 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               {classesLoading && (
                                 <Loader2 className="h-4 w-4 text-zinc-500 animate-spin" />
                               )}
+                              {alunos && alunos.length > 0 && (
+                                <button
+                                  onClick={() =>
+                                    openBulkTicketModal(turmaId, alunos)
+                                  }
+                                  className="h-9 w-9 flex items-center justify-center rounded-xl border border-zinc-800 text-zinc-600 hover:text-green-400 hover:border-green-500/30 hover:bg-green-500/5 transition-all"
+                                  title="Associar ingressos em massa"
+                                >
+                                  <LuTicketPlus className="h-4 w-4" />
+                                </button>
+                              )}
                               {alunos &&
                                 alunos.length > 0 &&
                                 (() => {
@@ -6838,6 +7025,321 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           </div>
         </div>
       )}
+
+      {/* ── MODAL: ASSOCIAR INGRESSOS EM MASSA (TURMA) ── */}
+      {bulkTicketModal &&
+        (() => {
+          const termo = bulkTicketSearch.trim().toLowerCase();
+          const alunosFiltrados = bulkTicketModal.alunos.filter((a) =>
+            termo ? (a.nome || "").toLowerCase().includes(termo) : true
+          );
+          const alunosComKey = alunosFiltrados.map((a, i) => ({
+            aluno: a,
+            key: a.id || `${a.nome}_${i}`,
+          }));
+          const totalSelecionados = bulkTicketSelected.size;
+          const todosFiltradosSelecionados =
+            alunosComKey.length > 0 &&
+            alunosComKey.every(({ key }) => bulkTicketSelected.has(key));
+
+          return (
+            <div
+              className="fixed inset-0 z-[118] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+              onClick={() => !bulkTicketLoading && setBulkTicketModal(null)}
+            >
+              <div
+                className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg shadow-2xl max-h-[92vh] flex flex-col overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/30 flex items-center justify-center">
+                      <LuTicketPlus className="h-5 w-5 text-green-400" />
+                    </div>
+                    <div>
+                      <p className="text-white font-bold text-sm leading-tight">
+                        Associar ingressos em massa
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-0.5">
+                        Turma {bulkTicketModal.turmaId}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      !bulkTicketLoading && setBulkTicketModal(null)
+                    }
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="overflow-y-auto flex-1">
+                  {bulkTicketResult ? (
+                    /* ── Resultado da operação ── */
+                    <div className="p-6 flex flex-col items-center text-center gap-3">
+                      <div className="w-14 h-14 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center">
+                        <CheckCircle2 className="h-7 w-7 text-green-400" />
+                      </div>
+                      <div>
+                        <p className="text-white font-bold text-base">
+                          {bulkTicketResult.criados} ingresso(s) associado(s)
+                        </p>
+                        {bulkTicketResult.ignorados > 0 && (
+                          <p className="text-zinc-500 text-xs mt-1">
+                            {bulkTicketResult.ignorados} aluno(s) ignorado(s)
+                            — já possuíam ingresso.
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 w-full mt-2">
+                        <button
+                          onClick={() => setBulkTicketResult(null)}
+                          className="flex-1 h-11 rounded-xl border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all"
+                        >
+                          Associar mais
+                        </button>
+                        <button
+                          onClick={() => setBulkTicketModal(null)}
+                          className="flex-1 h-11 rounded-xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all"
+                        >
+                          Concluir
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-5 space-y-5">
+                      {/* Busca + selecionar todos */}
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600" />
+                          <input
+                            type="text"
+                            placeholder="Buscar aluno..."
+                            value={bulkTicketSearch}
+                            onChange={(e) =>
+                              setBulkTicketSearch(e.target.value)
+                            }
+                            className="flex h-11 w-full rounded-xl border border-zinc-800 bg-black text-white pl-10 pr-4 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleBulkTicketSelectAll(alunosFiltrados)
+                            }
+                            className="text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center gap-1.5"
+                          >
+                            <CheckSquare className="h-3.5 w-3.5" />
+                            {todosFiltradosSelecionados
+                              ? "Desmarcar todos"
+                              : "Selecionar todos"}
+                          </button>
+                          <span className="text-xs text-zinc-500 font-semibold">
+                            {totalSelecionados} selecionado(s)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Lista de alunos com checkbox */}
+                      <div className="border border-zinc-800 rounded-xl divide-y divide-zinc-800/60 max-h-64 overflow-y-auto">
+                        {alunosComKey.length === 0 ? (
+                          <p className="text-zinc-600 text-sm text-center py-8">
+                            Nenhum aluno encontrado.
+                          </p>
+                        ) : (
+                          alunosComKey.map(({ aluno, key }) => {
+                            const jaTemIngresso = alunoJaTemIngresso(aluno);
+                            const selecionado =
+                              bulkTicketSelected.has(key);
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                disabled={jaTemIngresso}
+                                onClick={() => toggleBulkTicketSelect(key)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                                  jaTemIngresso
+                                    ? "opacity-40 cursor-not-allowed"
+                                    : "hover:bg-zinc-900/50"
+                                }`}
+                              >
+                                <div
+                                  className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                                    selecionado
+                                      ? "bg-white border-white"
+                                      : "border-zinc-700 bg-transparent"
+                                  }`}
+                                >
+                                  {selecionado && (
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-black" />
+                                  )}
+                                </div>
+                                <span className="text-white text-sm font-medium truncate flex-1">
+                                  {aluno.nome}
+                                </span>
+                                {jaTemIngresso && (
+                                  <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-[9px] font-bold text-green-400 uppercase tracking-wider">
+                                    ingresso
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* Tipo de ingresso (lote) */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                          Tipo de ingresso (lote)
+                        </label>
+                        <select
+                          value={bulkTicketForm.loteId}
+                          onChange={(e) =>
+                            setBulkTicketForm((p) => ({
+                              ...p,
+                              loteId: e.target.value,
+                            }))
+                          }
+                          className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
+                        >
+                          <option value="" disabled>
+                            Selecione o lote
+                          </option>
+                          {batches.map((b) => (
+                            <option
+                              key={b.id}
+                              value={b.id}
+                              className="bg-zinc-900"
+                            >
+                              {b.nome} — R${" "}
+                              {Number(b.preco).toFixed(2).replace(".", ",")}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Status (válido/pendente) + Pagamento */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Status (válido)
+                          </label>
+                          <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                            {(["pendente", "validado"] as const).map((s) => (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() =>
+                                  setBulkTicketForm((p) => ({
+                                    ...p,
+                                    status: s,
+                                  }))
+                                }
+                                className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${
+                                  bulkTicketForm.status === s
+                                    ? "bg-white text-black"
+                                    : "bg-black text-zinc-500 hover:text-white"
+                                }`}
+                              >
+                                {s === "validado" ? "Válido" : s}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Pagamento
+                          </label>
+                          <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                            {([false, true] as const).map((v) => (
+                              <button
+                                key={String(v)}
+                                type="button"
+                                onClick={() =>
+                                  setBulkTicketForm((p) => ({
+                                    ...p,
+                                    pago: v,
+                                  }))
+                                }
+                                className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${
+                                  bulkTicketForm.pago === v
+                                    ? "bg-white text-black"
+                                    : "bg-black text-zinc-500 hover:text-white"
+                                }`}
+                              >
+                                {v ? "Pago" : "Pendente"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Método de pagamento, se pago */}
+                      {bulkTicketForm.pago && (
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Método de pagamento
+                          </label>
+                          <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                            {(["pix", "dinheiro"] as const).map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() =>
+                                  setBulkTicketForm((p) => ({
+                                    ...p,
+                                    metodoPagamento:
+                                      m === "dinheiro" ? "dinheiro" : null,
+                                  }))
+                                }
+                                className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${
+                                  (bulkTicketForm.metodoPagamento ===
+                                    "dinheiro" &&
+                                    m === "dinheiro") ||
+                                  (bulkTicketForm.metodoPagamento === null &&
+                                    m === "pix")
+                                    ? "bg-white text-black"
+                                    : "bg-black text-zinc-500 hover:text-white"
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          fetchBatches();
+                          handleBulkAssociarIngressos();
+                        }}
+                        disabled={
+                          !bulkTicketForm.loteId ||
+                          bulkTicketSelected.size === 0 ||
+                          bulkTicketLoading
+                        }
+                        className="w-full h-11 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
+                      >
+                        {bulkTicketLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <LuTicketPlus className="h-4 w-4" />
+                        )}
+                        Associar a {bulkTicketSelected.size} aluno(s)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* ── MODAL DO ALUNO ── */}
       {studentModal && (
