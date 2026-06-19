@@ -3346,6 +3346,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                     const status = await checkPixStatus(pixData.paymentId);
                     if (status === "approved") {
                       setPixStatus("approved");
+                      setPixData(null); // para o polling antes de salvar o ingresso
                       await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
                     } else if (
                       status === "rejected" ||
