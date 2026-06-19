@@ -100,6 +100,88 @@ const db = getFirestore(app);
 // permitindo que o App.tsx pule a LP e abra direto o painel/ingressos.
 const SESSION_KEY = "fj_session";
 
+// Wrapper seguro para localStorage. Em alguns navegadores/contextos mobile
+// (Safari em modo privado no iOS, WebViews dentro de apps como Instagram/
+// Facebook/TikTok, ou Android com bloqueio de dados de sites) o acesso ao
+// localStorage lança uma exceção síncrona (SecurityError/QuotaExceededError)
+// em vez de simplesmente falhar. Sem este wrapper, qualquer setItem/removeItem
+// direto quebrava o app inteiro (tela branca) nesses celulares, mesmo
+// funcionando perfeitamente no PC e em outros aparelhos.
+const safeStorage = {
+  set: (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn("Não foi possível salvar no localStorage:", e);
+    }
+  },
+  remove: (key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn("Não foi possível remover do localStorage:", e);
+    }
+  },
+  get: (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn("Não foi possível ler do localStorage:", e);
+      return null;
+    }
+  },
+};
+
+// Error Boundary global: captura qualquer erro de renderização que escape
+// dos try/catch internos e mostra uma tela de recuperação em vez de deixar
+// a página em branco. Sem isso, um erro pontual (de rede, de um campo nulo,
+// de uma lib externa, etc.) derruba a árvore inteira do React silenciosamente.
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Erro capturado pelo ErrorBoundary:", error, info);
+  }
+  handleReload = () => {
+    this.setState({ hasError: false });
+    try {
+      window.location.reload();
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+          <div className="max-w-sm space-y-4">
+            <p className="text-white font-bold text-lg">
+              Ops! Algo deu errado.
+            </p>
+            <p className="text-zinc-400 text-sm">
+              Tente recarregar a página. Se o problema continuar, verifique
+              se o navegador está em modo de navegação privada/anônima ou
+              com bloqueio de dados de sites ativado.
+            </p>
+            <button
+              onClick={this.handleReload}
+              className="bg-white text-black font-semibold rounded-xl px-6 py-3 text-sm"
+            >
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ─── Ícone do Google ─── */
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none">
@@ -366,7 +448,7 @@ const formatDate = (iso) => {
 };
 
 /* ─── App Principal ─── */
-export default function CadastroApp({ onBack = () => {} }) {
+function CadastroAppInner({ onBack = () => {} }) {
   const [view, setView] = useState("loading");
   const [activeTab, setActiveTab] = useState("inicio");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -521,7 +603,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           const tickets = await fetchTicketsForUser(user.uid, userData.cpf);
 
           setPurchasedTickets(tickets);
-          localStorage.setItem(SESSION_KEY, "1");
+          safeStorage.set(SESSION_KEY, "1");
           setActiveTab("ingressos");
           setView("dashboard");
         } catch (err) {
@@ -530,7 +612,7 @@ export default function CadastroApp({ onBack = () => {} }) {
         }
       } else {
         setCurrentUser(null);
-        localStorage.removeItem(SESSION_KEY);
+        safeStorage.remove(SESSION_KEY);
         setView("auth_choice");
       }
       },
@@ -784,7 +866,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           // "presenca" => quem NÃO entrou (não marcou presença no evento)
           modoPendentes: "presenca",
         });
-        localStorage.setItem(SESSION_KEY, "1");
+        safeStorage.set(SESSION_KEY, "1");
         setIsLoading(false);
         setView("dashboard");
       }, 800);
@@ -810,7 +892,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           // "pagamento" => quem NÃO pagou o ingresso (comportamento original)
           modoPendentes: "pagamento",
         });
-        localStorage.setItem(SESSION_KEY, "1");
+        safeStorage.set(SESSION_KEY, "1");
         setIsLoading(false);
         setView("dashboard");
       }, 800);
@@ -845,7 +927,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           const tickets = await fetchTicketsForUser(testUid, userData.cpf);
           setPurchasedTickets(tickets);
 
-          localStorage.setItem(SESSION_KEY, "1");
+          safeStorage.set(SESSION_KEY, "1");
           setIsLoading(false);
           setActiveTab("ingressos");
           setView("dashboard");
@@ -862,7 +944,7 @@ export default function CadastroApp({ onBack = () => {} }) {
             email: "teste@teste.com",
             nomeResponsavel: "Usuário Teste",
           }));
-          localStorage.setItem(SESSION_KEY, "1");
+          safeStorage.set(SESSION_KEY, "1");
           setIsLoading(false);
           setView("complete_profile");
         }
@@ -1157,7 +1239,7 @@ export default function CadastroApp({ onBack = () => {} }) {
         );
         setPurchasedTickets(tickets);
 
-        localStorage.setItem(SESSION_KEY, "1");
+        safeStorage.set(SESSION_KEY, "1");
         setIsSuccess(false);
         setView("dashboard");
       }, 2000);
@@ -1174,7 +1256,7 @@ export default function CadastroApp({ onBack = () => {} }) {
 
   const confirmLogout = async () => {
     setShowLogoutConfirm(false);
-    localStorage.removeItem(SESSION_KEY);
+    safeStorage.remove(SESSION_KEY);
     // Se for admin ou conta de teste, apenas limpamos o bypass e a sessão mockada
     if (currentUser?.isAdmin || currentUser?.isTest) {
       adminBypassRef.current = false;
@@ -3640,4 +3722,16 @@ export default function CadastroApp({ onBack = () => {} }) {
         </div>
       </div>
     );
+}
+
+// Export default agora envolve o app com o AppErrorBoundary: se qualquer
+// erro inesperado escapar dos try/catch internos durante a renderização,
+// o usuário vê uma tela de recuperação ("Recarregar") em vez de uma tela
+// branca sem explicação.
+export default function CadastroApp(props) {
+  return (
+    <AppErrorBoundary>
+      <CadastroAppInner {...props} />
+    </AppErrorBoundary>
+  );
 }
