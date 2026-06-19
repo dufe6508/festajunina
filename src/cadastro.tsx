@@ -415,9 +415,7 @@ export default function CadastroApp({ onBack = () => {} }) {
   // Carrinho refatorado para suportar Lotes por ID
   // Formato: { [batchId]: { qty: number, nome: string, preco: number } }
   const [cart, setCart] = useState({});
-  // cartRef mantém sempre o valor mais recente do carrinho para uso em
-  // callbacks assíncronos / closures do polling do PIX (evita stale closure)
-  const cartRef = useRef({});
+  const cartRef = useRef(cart); // Ref para evitar closure stale no polling do PIX
   useEffect(() => { cartRef.current = cart; }, [cart]);
   const cartItems = Object.values(cart);
   const totalCart = cartItems.reduce(
@@ -3336,40 +3334,9 @@ export default function CadastroApp({ onBack = () => {} }) {
                 </div>
 
                 <p className="text-xs text-[#999999] text-center">
-                  A confirmação é automática após o pagamento. Se preferir,
-                  confira manualmente:
+                  A confirmação é automática após o pagamento.
                 </p>
 
-                {/* Confirmar pagamento (verifica status real no Mercado Pago) */}
-                <Button
-                  className="w-full h-14 !bg-[#009EE3] !text-white hover:!bg-[#0089C7] !rounded-lg !font-semibold"
-                  onClick={async () => {
-                    setIsPaymentLoading(true);
-                    const status = await checkPixStatus(pixData.paymentId);
-                    if (status === "approved") {
-                      setPixStatus("approved");
-                      setPixData(null); // para o polling antes de salvar o ingresso
-                      await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
-                    } else if (
-                      status === "rejected" ||
-                      status === "cancelled"
-                    ) {
-                      showToast(
-                        "Pagamento PIX não aprovado. Gere um novo código."
-                      );
-                      setPixData(null);
-                    } else {
-                      showToast(
-                        "Pagamento ainda não identificado. Aguarde um momento e tente novamente."
-                      );
-                    }
-                    setIsPaymentLoading(false);
-                  }}
-                  isLoading={isPaymentLoading}
-                >
-                  <CheckCircle2 className="h-5 w-5" /> Já paguei — Verificar
-                  agora
-                </Button>
                 <button
                   onClick={() => {
                     setPixData(null);
