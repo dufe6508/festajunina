@@ -1532,16 +1532,7 @@ function CadastroAppInner({ onBack = () => {} }) {
         result.status === "in_process" ||
         result.status === "pending"
       ) {
-        // NÃO criamos ingresso pendente no front — o webhook do MP criará
-        // automaticamente quando o pagamento for aprovado, e o ingresso
-        // chegará por e-mail. Evita o bug de "2 ingressos não pagos".
-        showToast(
-          "Pagamento em análise. Você receberá o ingresso por e-mail assim que for aprovado."
-        );
-        setMpPreferenceId(null);
-        setPixData(null);
-        setPixStatus(null);
-        setCart({});
+        await handleMpSuccess({ paymentId: result.id, status: result.status });
       } else {
         showToast(
           result.message ||
@@ -1570,6 +1561,46 @@ function CadastroAppInner({ onBack = () => {} }) {
     return `FJ-${String(novoNumero).padStart(4, "0")}`;
   };
 
+  // 🔒 Criação ATÔMICA do ingresso (mesma estratégia usada no webhook
+  // api/mp-webhook.js): usa o próprio mpPaymentId como ID de um documento de
+  // "reserva" em pagamentos_processados/{paymentId}. Tudo — checar se já foi
+  // processado, gerar o código sequencial e criar o ingresso — acontece
+  // dentro de UMA ÚNICA transação do Firestore. Antes, o código fazia um
+  // getDocs (consulta) e SÓ DEPOIS um setDoc (criação) como duas operações
+  // separadas — se o webhook do servidor processasse o mesmo pagamento entre
+  // essas duas etapas, os dois lados viam "não existe" e cada um criava o
+  // seu próprio ingresso, gerando duplicidade. Com a transação, o Firestore
+  // garante que apenas um dos dois processos (cliente OU webhook) consegue
+  // criar a reserva — o outro lê o resultado já existente e não duplica.
+  const criarIngressoAtomico = async (paymentId, montarTicket) => {
+    const reservaRef = doc(db, "pagamentos_processados", String(paymentId));
+    const counterRef = doc(db, "config", "ticketCounter");
+
+    return runTransaction(db, async (transaction) => {
+      const reservaSnap = await transaction.get(reservaRef);
+      if (reservaSnap.exists()) {
+        return { code: reservaSnap.data().code, criadoAgora: false };
+      }
+
+      const counterSnap = await transaction.get(counterRef);
+      const atual = counterSnap.exists() ? counterSnap.data().ultimo || 0 : 0;
+      const proximo = atual + 1;
+      const code = `FJ-${String(proximo).padStart(4, "0")}`;
+      const ticket = montarTicket(code);
+
+      transaction.set(counterRef, { ultimo: proximo });
+      transaction.set(doc(db, "ingressos", code), ticket);
+      transaction.set(reservaRef, {
+        code,
+        mpPaymentId: String(paymentId),
+        origem: "cliente",
+        criadoEm: new Date().toISOString(),
+      });
+
+      return { code, criadoAgora: true, ticket };
+    });
+  };
+
   const handleMpSuccess = async (paymentData) => {
     // 🔒 Trava local: impede que duas chamadas concorrentes (ex: ticks do
     // polling do PIX disparando quase juntos) entrem na função ao mesmo tempo
@@ -1577,31 +1608,6 @@ function CadastroAppInner({ onBack = () => {} }) {
     isGeneratingTicketRef.current = true;
     try {
       const paymentId = paymentData?.paymentId || "";
-
-      // 🔒 Idempotência: evita gerar mais de um ingresso para o mesmo pagamento
-      // (corrige o bug do polling do PIX / cliques duplicados gerando vários ingressos)
-      if (paymentId) {
-        const dupQuery = query(
-          collection(db, "ingressos"),
-          where("mpPaymentId", "==", String(paymentId))
-        );
-        const dupSnap = await getDocs(dupQuery);
-        if (!dupSnap.empty) {
-          const existing = dupSnap.docs[0];
-          setPurchasedTickets((prev) => [
-            ...prev,
-            { id: existing.id, ...existing.data() },
-          ]);
-          setMpPreferenceId(null);
-          setPixData(null);
-          setPixStatus(null);
-          setCart({});
-          setView("success_purchase");
-          return;
-        }
-      }
-
-      const uniqueCode = await gerarCodigoIngresso();
 
       // Resgata o nome do lote que estava no carrinho.
       // Usa cartRef.current (não cart) para garantir o valor mais recente
@@ -1620,7 +1626,7 @@ function CadastroAppInner({ onBack = () => {} }) {
       const statusReal = paymentData?.status || "approved";
       const estaPago = !!paymentData?.isTest || statusReal === "approved";
 
-      const ticketData = {
+      const montarTicket = (uniqueCode) => ({
         userId: currentUser.uid,
         nomeAluno:
           currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
@@ -1631,7 +1637,7 @@ function CadastroAppInner({ onBack = () => {} }) {
         code: uniqueCode,
         criadoEm: new Date().toISOString(),
         paymentMethod: paymentData?.isTest ? "teste" : "mercadopago",
-        mpPaymentId: paymentData?.paymentId ? String(paymentData.paymentId) : "",
+        mpPaymentId: paymentData?.paymentId || "",
         statusPagamento: paymentData?.isTest ? "approved" : statusReal,
         turma: currentUser.turma || "",
         ano: currentUser.ano || "",
@@ -1639,11 +1645,44 @@ function CadastroAppInner({ onBack = () => {} }) {
         pagamentoConfirmado: estaPago,
         dataPagamento: estaPago ? new Date().toISOString() : null,
         ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
-        email: currentUser.email || "",
-      };
+      });
 
-      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      // 🔒 Pagamentos de teste não têm mpPaymentId real e nunca passam pelo
+      // webhook, então seguem o fluxo simples (sem precisar de reserva).
+      let uniqueCode;
+      let ticketData;
+      let criadoAgora = true;
 
+      if (paymentId) {
+        const resultado = await criarIngressoAtomico(paymentId, montarTicket);
+        uniqueCode = resultado.code;
+        criadoAgora = resultado.criadoAgora;
+        ticketData = resultado.ticket || (await getDoc(doc(db, "ingressos", uniqueCode))).data();
+
+        if (!criadoAgora) {
+          // O webhook (ou outra aba/tentativa) já processou este pagamento.
+          // Não duplica nada — só mostra o ingresso já existente.
+          setPurchasedTickets((prev) => [
+            ...prev,
+            { id: uniqueCode, ...ticketData },
+          ]);
+          setMpPreferenceId(null);
+          setPixData(null);
+          setPixStatus(null);
+          setCart({});
+          setView("success_purchase");
+          return;
+        }
+      } else {
+        uniqueCode = await gerarCodigoIngresso();
+        ticketData = montarTicket(uniqueCode);
+        await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+      }
+
+      // Mantém o contador "ingressosAssociados" do lote em dia (mesmo campo
+      // que o painel admin usa), evitando que a loja precise reler todos os
+      // ingressos só para saber quantos já foram vendidos. Só conta para o
+      // limite do lote quando o pagamento já está confirmado.
       if (purchasedItem.loteId && estaPago) {
         updateDoc(doc(db, "lotes", purchasedItem.loteId), {
           ingressosAssociados: increment(purchasedItem.qty || 1),
