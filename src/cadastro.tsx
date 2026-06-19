@@ -3164,8 +3164,8 @@ export default function CadastroApp({ onBack = () => {} }) {
   /* ─── PAGAMENTO TRANSPARENTE ─── */
   if (view === "payment")
     return (
-      <div className="min-h-screen bg-[#EBEBEB] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl border border-[#E6E6E6] overflow-hidden shadow-sm">
+      <div className="min-h-screen bg-[#EBEBEB] flex flex-col items-center py-6 px-4">
+        <div className="max-w-md w-full bg-white rounded-2xl border border-[#E6E6E6] shadow-sm">
           {/* Header */}
           <div className="bg-white px-5 py-4 border-b border-[#EEEEEE] flex items-center gap-3">
             <button
