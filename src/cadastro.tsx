@@ -1532,7 +1532,16 @@ function CadastroAppInner({ onBack = () => {} }) {
         result.status === "in_process" ||
         result.status === "pending"
       ) {
-        await handleMpSuccess({ paymentId: result.id, status: result.status });
+        // NÃO criamos ingresso pendente no front — o webhook do MP criará
+        // automaticamente quando o pagamento for aprovado, e o ingresso
+        // chegará por e-mail. Evita o bug de "2 ingressos não pagos".
+        showToast(
+          "Pagamento em análise. Você receberá o ingresso por e-mail assim que for aprovado."
+        );
+        setMpPreferenceId(null);
+        setPixData(null);
+        setPixStatus(null);
+        setCart({});
       } else {
         showToast(
           result.message ||
@@ -1574,7 +1583,7 @@ function CadastroAppInner({ onBack = () => {} }) {
       if (paymentId) {
         const dupQuery = query(
           collection(db, "ingressos"),
-          where("mpPaymentId", "==", paymentId)
+          where("mpPaymentId", "==", String(paymentId))
         );
         const dupSnap = await getDocs(dupQuery);
         if (!dupSnap.empty) {
@@ -1622,7 +1631,7 @@ function CadastroAppInner({ onBack = () => {} }) {
         code: uniqueCode,
         criadoEm: new Date().toISOString(),
         paymentMethod: paymentData?.isTest ? "teste" : "mercadopago",
-        mpPaymentId: paymentData?.paymentId || "",
+        mpPaymentId: paymentData?.paymentId ? String(paymentData.paymentId) : "",
         statusPagamento: paymentData?.isTest ? "approved" : statusReal,
         turma: currentUser.turma || "",
         ano: currentUser.ano || "",
@@ -1630,14 +1639,11 @@ function CadastroAppInner({ onBack = () => {} }) {
         pagamentoConfirmado: estaPago,
         dataPagamento: estaPago ? new Date().toISOString() : null,
         ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
+        email: currentUser.email || "",
       };
 
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
 
-      // Mantém o contador "ingressosAssociados" do lote em dia (mesmo campo
-      // que o painel admin usa), evitando que a loja precise reler todos os
-      // ingressos só para saber quantos já foram vendidos. Só conta para o
-      // limite do lote quando o pagamento já está confirmado.
       if (purchasedItem.loteId && estaPago) {
         updateDoc(doc(db, "lotes", purchasedItem.loteId), {
           ingressosAssociados: increment(purchasedItem.qty || 1),
