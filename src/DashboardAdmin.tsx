@@ -266,7 +266,46 @@ const StatCard = ({
   );
 };
 
-export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
+// Error Boundary local: evita que um erro de renderização dentro do painel
+// admin derrube a tela inteira para branco (mesmo problema identificado e
+// corrigido no cadastro1.tsx — aqui aplicado por segurança também).
+class AdminErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Erro capturado pelo ErrorBoundary do Admin:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+          <div className="max-w-sm space-y-4">
+            <p className="text-white font-bold text-lg">
+              Ops! Algo deu errado no painel.
+            </p>
+            <p className="text-zinc-400 text-sm">
+              Tente recarregar a página.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-white text-black font-semibold rounded-xl px-6 py-3 text-sm"
+            >
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   const [activeTab, setActiveTab] = useState("admin_scanner");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -10210,5 +10249,13 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         );
       })()}
     </div>
+  );
+}
+
+export default function DashboardAdmin(props) {
+  return (
+    <AdminErrorBoundary>
+      <DashboardAdminInner {...props} />
+    </AdminErrorBoundary>
   );
 }
