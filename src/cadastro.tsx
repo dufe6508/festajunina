@@ -136,13 +136,30 @@ const safeStorage = {
 // dos try/catch internos e mostra uma tela de recuperação em vez de deixar
 // a página em branco. Sem isso, um erro pontual (de rede, de um campo nulo,
 // de uma lib externa, etc.) derruba a árvore inteira do React silenciosamente.
+// Detecta se o erro capturado foi provocado pela tradução automática do
+// navegador (Google Translate / tradutor nativo do Chrome/Safari no
+// mobile). Esses tradutores reescrevem o DOM por fora do React, e quando o
+// React tenta atualizar/remover um nó que o tradutor já alterou, ele lança
+// erros típicos como "removeChild"/"insertBefore"/"NotFoundError" ou
+// "Failed to execute ... on 'Node'". Isso NÃO é um bug do app — é
+// incompatibilidade entre o tradutor automático e o React.
+const isLikelyTranslateError = (error) => {
+  const msg = String(error?.message || error || "");
+  return (
+    /removeChild|insertBefore|appendChild/i.test(msg) ||
+    /NotFoundError/i.test(msg) ||
+    /Failed to execute .* on 'Node'/i.test(msg) ||
+    /The node to be removed is not a child/i.test(msg)
+  );
+};
+
 class AppErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, isTranslateError: false };
   }
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, isTranslateError: isLikelyTranslateError(error) };
   }
   componentDidCatch(error, info) {
     console.error("Erro capturado pelo ErrorBoundary:", error, info);
@@ -157,6 +174,36 @@ class AppErrorBoundary extends React.Component {
   };
   render() {
     if (this.state.hasError) {
+      if (this.state.isTranslateError) {
+        return (
+          <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+            <div className="max-w-sm space-y-4">
+              <p className="text-white font-bold text-lg">
+                Desative a tradução automática
+              </p>
+              <p className="text-zinc-400 text-sm">
+                Detectamos que a tradução automática do navegador (Google
+                Tradutor) está ativa nesta página, e ela conflita com o
+                funcionamento do app. Desative a tradução e recarregue:
+              </p>
+              <div className="text-left text-zinc-400 text-sm space-y-2 bg-zinc-900 rounded-xl p-4">
+                <p className="text-white font-semibold">No Chrome (Android):</p>
+                <p>Toque nos 3 pontinhos (⋮) → desmarque "Traduzir página".</p>
+                <p className="text-white font-semibold pt-2">No Safari (iPhone):</p>
+                <p>
+                  Toque em "Aa" na barra de endereço → "Desativar Tradução".
+                </p>
+              </div>
+              <button
+                onClick={this.handleReload}
+                className="bg-white text-black font-semibold rounded-xl px-6 py-3 text-sm"
+              >
+                Já desativei, recarregar
+              </button>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
           <div className="max-w-sm space-y-4">
@@ -3728,7 +3775,36 @@ function CadastroAppInner({ onBack = () => {} }) {
 // erro inesperado escapar dos try/catch internos durante a renderização,
 // o usuário vê uma tela de recuperação ("Recarregar") em vez de uma tela
 // branca sem explicação.
+// Tenta desativar a tradução automática do navegador em todas as camadas
+// possíveis. Isso reduz MUITO a chance do erro acontecer (em vez de só
+// tratar o erro depois que ele já ocorreu):
+// 1. <html translate="no">      → padrão suportado por Chrome/Edge/Safari
+// 2. <meta name="google" content="notranslate"> → instrução específica do Google Translate
+// 3. classe "notranslate" no <html> e <body> → Google Translate respeita essa classe
+// Nada disso garante 100% (o usuário/SO pode forçar a tradução mesmo assim),
+// por isso o AppErrorBoundary acima continua como rede de segurança.
+function useDisableAutoTranslate() {
+  useEffect(() => {
+    try {
+      const html = document.documentElement;
+      html.setAttribute("translate", "no");
+      html.classList.add("notranslate");
+      document.body?.classList.add("notranslate");
+
+      if (!document.querySelector('meta[name="google"]')) {
+        const meta = document.createElement("meta");
+        meta.name = "google";
+        meta.content = "notranslate";
+        document.head.appendChild(meta);
+      }
+    } catch (e) {
+      console.warn("Não foi possível aplicar notranslate:", e);
+    }
+  }, []);
+}
+
 export default function CadastroApp(props) {
+  useDisableAutoTranslate();
   return (
     <AppErrorBoundary>
       <CadastroAppInner {...props} />
