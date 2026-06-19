@@ -407,7 +407,6 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [currentUser, setCurrentUser] = useState(null);
 
   const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
-  const cartRef = useRef(cart); // Ref para evitar closure stale no polling do PIX
 
   // Estados dos Lotes Visíveis
   const [batches, setBatches] = useState([]);
@@ -416,6 +415,9 @@ export default function CadastroApp({ onBack = () => {} }) {
   // Carrinho refatorado para suportar Lotes por ID
   // Formato: { [batchId]: { qty: number, nome: string, preco: number } }
   const [cart, setCart] = useState({});
+  // cartRef mantém sempre o valor mais recente do carrinho para uso em
+  // callbacks assíncronos / closures do polling do PIX (evita stale closure)
+  const cartRef = useRef({});
   useEffect(() => { cartRef.current = cart; }, [cart]);
   const cartItems = Object.values(cart);
   const totalCart = cartItems.reduce(
