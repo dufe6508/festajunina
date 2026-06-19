@@ -2361,6 +2361,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
         publico: batchModal.publico || "Ambos",
         visivel: batchModal.visivel !== undefined ? batchModal.visivel : true,
         turmasVisiveis: todasMarcadas ? null : turmasSelecionadas,
+        esgotado: batchModal.esgotado === true,
       };
 
       if (batchModal.id) {
@@ -4459,7 +4460,7 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                       : totalNaDB;
                     const limite = Number(batch.quantidade) || 0;
                     const pct = limite > 0 ? Math.min(100, (totalExibido / limite) * 100) : 0;
-                    const esgotado = limite > 0 && totalExibido >= limite;
+                    const esgotado = batch.esgotado === true || (limite > 0 && totalExibido >= limite);
                     return (
                     <div
                       key={batch.id}
@@ -4534,6 +4535,11 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                               ? batch.turmasVisiveis.join(", ")
                               : `${batch.turmasVisiveis.length} turmas`}
                           </span>
+                          {batch.esgotado && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-[11px] text-red-400 font-bold">
+                              Esgotado
+                            </span>
+                          )}
                           {batch.dataLimite && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 font-medium">
                               <Clock className="w-3 h-3" />{" "}
@@ -8642,6 +8648,52 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
                 )}
               </div>
               )}
+              {/* ── Toggle Esgotado Manualmente ── */}
+              <button
+                type="button"
+                onClick={() =>
+                  setBatchModal({ ...batchModal, esgotado: !batchModal.esgotado })
+                }
+                className={`w-full flex items-center justify-between px-5 py-4 rounded-xl border transition-all ${
+                  batchModal.esgotado
+                    ? "border-red-500/40 bg-red-500/5"
+                    : "border-zinc-800 bg-black hover:border-zinc-700"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                      batchModal.esgotado
+                        ? "bg-red-500 border-red-500"
+                        : "border-zinc-600 bg-transparent"
+                    }`}
+                  >
+                    {batchModal.esgotado && (
+                      <svg viewBox="0 0 10 10" className="w-3 h-3">
+                        <path
+                          d="M1.5 5L4 7.5L8.5 2.5"
+                          stroke="white"
+                          strokeWidth="2"
+                          fill="none"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="text-left">
+                    <p className={`text-sm font-bold ${batchModal.esgotado ? "text-red-400" : "text-zinc-400"}`}>
+                      Marcar como Esgotado
+                    </p>
+                    <p className="text-xs text-zinc-600 mt-0.5">
+                      {batchModal.esgotado
+                        ? "Usuários verão este lote como esgotado"
+                        : "Esgotamento automático por quantidade ativo"}
+                    </p>
+                  </div>
+                </div>
+              </button>
+
               <div className="pt-4 flex gap-3">
                 <Button
                   type="button"
