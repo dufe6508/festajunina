@@ -55,6 +55,7 @@ import {
   getDocs,
   updateDoc,
   runTransaction,
+  increment,
 } from "firebase/firestore";
 
 // Mercado Pago Public Key (modo transparente)
@@ -552,21 +553,12 @@ export default function CadastroApp({ onBack = () => {} }) {
   const fetchBatches = async () => {
     setLoadingBatches(true);
     try {
-      const [snap, ticketsSnap] = await Promise.all([
-        getDocs(collection(db, "lotes")),
-        getDocs(collection(db, "ingressos")).catch(() =>
-          getDocs(collection(db, "tickets")).catch(() => ({ forEach: () => {} }))
-        ),
-      ]);
-
-      // Conta ingressos PAGOS por nome de lote
-      const soldByName = {};
-      ticketsSnap.forEach?.((d) => {
-        const t = d.data();
-        if (!t?.pagamentoConfirmado) return;
-        const key = t.type || "";
-        soldByName[key] = (soldByName[key] || 0) + (Number(t.qty) || 1);
-      });
+      // Antes lia TODA a coleção "ingressos" só para contar quantos foram
+      // vendidos por lote — isso gerava milhares de leituras no Firestore
+      // a cada visita à loja. Agora usamos o contador "ingressosAssociados"
+      // já mantido no próprio documento do lote (mesmo padrão do painel
+      // admin), então só lemos os documentos de "lotes".
+      const snap = await getDocs(collection(db, "lotes"));
 
       const list = [];
 
@@ -598,7 +590,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           return;
         }
 
-        const vendidos = soldByName[data.nome] || 0;
+        const vendidos = Number(data.ingressosAssociados) || 0;
         const bloqueadoParaAluno = !!data.bloqueado && isAluno;
         list.push({ id: docSnap.id, ...data, vendidos, bloqueadoParaAluno });
       });
@@ -1212,6 +1204,7 @@ export default function CadastroApp({ onBack = () => {} }) {
           qty: newQty,
           preco: Number(batch.preco),
           nome: batch.nome,
+          loteId: batch.id,
         };
       }
       return newCart;
@@ -1248,6 +1241,7 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [pixStatus, setPixStatus] = useState(null); // "pending" | "approved" | "rejected" | "cancelled"
   const [pixChecking, setPixChecking] = useState(false);
   const [cardInstallments, setCardInstallments] = useState([]);
+  const isGeneratingTicketRef = useRef(false);
 
   // Gera pagamento PIX via API transparente
   const handlePixPayment = async () => {
@@ -1364,12 +1358,12 @@ export default function CadastroApp({ onBack = () => {} }) {
       const result = await res.json();
 
       if (result.status === "approved") {
-        await handleMpSuccess({ paymentId: result.id });
+        await handleMpSuccess({ paymentId: result.id, status: "approved" });
       } else if (
         result.status === "in_process" ||
         result.status === "pending"
       ) {
-        await handleMpSuccess({ paymentId: result.id });
+        await handleMpSuccess({ paymentId: result.id, status: result.status });
       } else {
         showToast(
           result.message ||
@@ -1399,7 +1393,36 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
   const handleMpSuccess = async (paymentData) => {
+    // 🔒 Trava local: impede que duas chamadas concorrentes (ex: ticks do
+    // polling do PIX disparando quase juntos) entrem na função ao mesmo tempo
+    if (isGeneratingTicketRef.current) return;
+    isGeneratingTicketRef.current = true;
     try {
+      const paymentId = paymentData?.paymentId || "";
+
+      // 🔒 Idempotência: evita gerar mais de um ingresso para o mesmo pagamento
+      // (corrige o bug do polling do PIX / cliques duplicados gerando vários ingressos)
+      if (paymentId) {
+        const dupQuery = query(
+          collection(db, "ingressos"),
+          where("mpPaymentId", "==", paymentId)
+        );
+        const dupSnap = await getDocs(dupQuery);
+        if (!dupSnap.empty) {
+          const existing = dupSnap.docs[0];
+          setPurchasedTickets((prev) => [
+            ...prev,
+            { id: existing.id, ...existing.data() },
+          ]);
+          setMpPreferenceId(null);
+          setPixData(null);
+          setPixStatus(null);
+          setCart({});
+          setView("success_purchase");
+          return;
+        }
+      }
+
       const uniqueCode = await gerarCodigoIngresso();
 
       // Resgata o nome do lote que estava no carrinho
@@ -1410,24 +1433,48 @@ export default function CadastroApp({ onBack = () => {} }) {
         qty: 1,
       };
 
+      // Só consideramos o ingresso "pago" quando o teste-bypass é usado ou
+      // quando o Mercado Pago de fato retornou status "approved". Status
+      // "pending"/"in_process" gera o ingresso (reserva o lugar), mas marca
+      // como não pago até a confirmação chegar.
+      const statusReal = paymentData?.status || "approved";
+      const estaPago = !!paymentData?.isTest || statusReal === "approved";
+
       const ticketData = {
         userId: currentUser.uid,
         nomeAluno:
           currentUser.nomeAluno || currentUser.nomeResponsavel || "Usuário",
         type: purchasedItem.nome, // Salva o nome do lote escolhido
+        loteId: purchasedItem.loteId || null,
         qty: purchasedItem.qty,
         price: purchasedItem.preco,
         code: uniqueCode,
         criadoEm: new Date().toISOString(),
         paymentMethod: paymentData?.isTest ? "teste" : "mercadopago",
         mpPaymentId: paymentData?.paymentId || "",
+        statusPagamento: paymentData?.isTest ? "approved" : statusReal,
         turma: currentUser.turma || "",
         ano: currentUser.ano || "",
         isTest: !!paymentData?.isTest,
+        pagamentoConfirmado: estaPago,
+        dataPagamento: estaPago ? new Date().toISOString() : null,
         ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
       };
 
       await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      // Mantém o contador "ingressosAssociados" do lote em dia (mesmo campo
+      // que o painel admin usa), evitando que a loja precise reler todos os
+      // ingressos só para saber quantos já foram vendidos. Só conta para o
+      // limite do lote quando o pagamento já está confirmado.
+      if (purchasedItem.loteId && estaPago) {
+        updateDoc(doc(db, "lotes", purchasedItem.loteId), {
+          ingressosAssociados: increment(purchasedItem.qty || 1),
+        }).catch((err) =>
+          console.warn("Falha ao atualizar contador do lote:", err)
+        );
+      }
+
       setPurchasedTickets((prev) => [
         ...prev,
         { id: uniqueCode, ...ticketData },
@@ -1462,6 +1509,8 @@ export default function CadastroApp({ onBack = () => {} }) {
       showToast(
         "Pagamento recebido, mas erro ao salvar ingresso. Contate o suporte."
       );
+    } finally {
+      isGeneratingTicketRef.current = false;
     }
   };
 
@@ -1491,7 +1540,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       if (status === "approved") {
         setPixStatus("approved");
         clearInterval(interval);
-        await handleMpSuccess({ paymentId: pixData.paymentId });
+        await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
       } else if (status === "rejected" || status === "cancelled") {
         setPixStatus(status);
         clearInterval(interval);
@@ -3272,7 +3321,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                     const status = await checkPixStatus(pixData.paymentId);
                     if (status === "approved") {
                       setPixStatus("approved");
-                      await handleMpSuccess({ paymentId: pixData.paymentId });
+                      await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
                     } else if (
                       status === "rejected" ||
                       status === "cancelled"
