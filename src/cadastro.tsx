@@ -612,9 +612,9 @@ export default function CadastroApp({ onBack = () => {} }) {
   };
 
 
-  const showToast = (message, type = "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+  const showToast = (message, type = "error", extra = {}) => {
+    setToast({ message, type, ...extra });
+    setTimeout(() => setToast(null), 6000);
   };
 
   const applyPhoneMask = (v) => {
@@ -884,9 +884,33 @@ export default function CadastroApp({ onBack = () => {} }) {
       await signInWithEmailAndPassword(auth, formData.email, formData.senha);
     } catch (error) {
       setIsLoading(false);
+
+      // Conta criada com Google — não tem senha própria
+      if (
+        error.code === "auth/wrong-password" ||
+        error.code === "auth/invalid-credential" ||
+        error.code === "auth/invalid-login-credentials"
+      ) {
+        // Verifica se o e-mail pertence a uma conta Google
+        try {
+          const methods = await fetchSignInMethodsForEmail(auth, formData.email);
+          if (methods.includes("google.com")) {
+            showToast(
+              "Esta conta foi criada com o Google. Use o botão abaixo para entrar.",
+              "error",
+              { isGoogleAccount: true }
+            );
+            return;
+          }
+        } catch {}
+        showToast("E-mail ou senha incorretos.");
+        return;
+      }
+
       let msg = "E-mail ou senha incorretos.";
       if (error.code === "auth/user-not-found") msg = "Usuário não encontrado.";
-      if (error.code === "auth/wrong-password") msg = "Senha incorreta.";
+      if (error.code === "auth/too-many-requests")
+        msg = "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
       showToast(msg);
     }
   };
@@ -1624,9 +1648,19 @@ export default function CadastroApp({ onBack = () => {} }) {
             <GoogleIcon /> Entrar com Google
           </Button>
           {toast && (
-            <div className="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-center gap-3">
-              <AlertCircle className="h-5 w-5 shrink-0" />
-              {toast.message}
+            <div className="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p>{toast.message}</p>
+                {toast.isGoogleAccount && (
+                  <button
+                    onClick={handleGoogleLogin}
+                    className="flex items-center gap-2 mt-1 bg-white text-black text-xs font-bold px-3 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
+                  >
+                    <GoogleIcon /> Entrar com Google
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
