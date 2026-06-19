@@ -1,20 +1,19 @@
-// api/mp-webhook.js — VERSÃO CORRIGIDA
-// Mudanças principais:
-//  1. mpPaymentId SEMPRE como String — consistente com o front
-//  2. Se ingresso já existe (criado pelo front em status pending), faz UPSERT
-//     marcando como pago em vez de só ignorar como "dedup"
-//  3. Retorna 500 em exceções não previstas → MP reentrega (não perde pagamento)
-//  4. Se não achar o dono (uid/email) NÃO cria ingresso órfão — retorna 500 pra reentrega
+// api/mp-webhook.js — NOVO. Webhook do Mercado Pago.
+// Esta é a peça que falta hoje e que causa a maior parte dos ingressos perdidos:
+// quando o cliente paga e fecha a aba antes do polling capturar o "approved", o
+// ingresso nunca é criado. O MP chama este endpoint sempre que o pagamento muda
+// de status — aqui criamos o ingresso no Firestore e disparamos o e-mail
+// independentemente do navegador do cliente estar aberto.
 //
-// VARIÁVEIS DE AMBIENTE (Vercel):
-//   MP_ACCESS_TOKEN
-//   FIREBASE_SERVICE_ACCOUNT  (JSON inteiro da service account)
-//   SEND_EMAIL_URL            (ex: https://festajunina-api.vercel.app/api/send-email)
+// REQUISITOS (variáveis de ambiente no Vercel):
+//   MP_ACCESS_TOKEN              — access token do MP (já existe)
+//   FIREBASE_SERVICE_ACCOUNT     — JSON da service account do Firebase (cole o JSON inteiro)
+//   SEND_EMAIL_URL               — ex: https://festajunina-api.vercel.app/api/send-email
 //
 // CONFIGURAR NO MERCADO PAGO:
-//   Painel MP → Suas integrações → seu app → Webhooks
-//   URL:    https://SEU-DOMINIO/api/mp-webhook
-//   Evento: Pagamentos (payment)
+//   Painel do MP → "Suas integrações" → seu app → Webhooks → adicionar:
+//     https://SEU-DOMINIO/api/mp-webhook
+//   Eventos: "Pagamentos" (payment)
 
 const admin = require("firebase-admin");
 
@@ -36,26 +35,63 @@ async function fetchPayment(id) {
   return r.json();
 }
 
-async function gerarCodigoIngresso(db) {
-  const ref = db.collection("config").doc("ticketCounter");
-  const novo = await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const atual = snap.exists ? snap.data().ultimo || 0 : 0;
+// 🔒 Criação ATÔMICA do ingresso.
+// Em vez de "consultar se já existe" e DEPOIS "criar" (duas operações
+// separadas, sujeitas a corrida quando o cliente e o webhook disparam quase
+// juntos), usamos uma única transação do Firestore que:
+//   1. Usa o próprio mpPaymentId como ID de um documento de "reserva"
+//      (pagamentos_processados/{paymentId}).
+//   2. Se essa reserva já existir, alguém (cliente ou webhook) já processou
+//      este pagamento — devolve o código existente, NADA é criado de novo.
+//   3. Se não existir, gera o próximo código do contador e cria o ingresso +
+//      a reserva DENTRO da mesma transação, de forma indivisível.
+// Como o Firestore garante que transações concorrentes sobre o mesmo
+// documento (a reserva) não podem ambas "vencer", é impossível dois
+// processos criarem dois ingressos para o mesmo pagamento, mesmo que
+// cheguem no mesmo milissegundo.
+async function criarIngressoAtomico(db, paymentId, montarTicket) {
+  const reservaRef = db.collection("pagamentos_processados").doc(String(paymentId));
+  const counterRef = db.collection("config").doc("ticketCounter");
+
+  return db.runTransaction(async (tx) => {
+    const reservaSnap = await tx.get(reservaRef);
+    if (reservaSnap.exists) {
+      // Já processado por este ou outro processo — não cria de novo.
+      const { code } = reservaSnap.data();
+      return { code, criadoAgora: false };
+    }
+
+    const counterSnap = await tx.get(counterRef);
+    const atual = counterSnap.exists ? counterSnap.data().ultimo || 0 : 0;
     const proximo = atual + 1;
-    tx.set(ref, { ultimo: proximo });
-    return proximo;
+    const code = `FJ-${String(proximo).padStart(4, "0")}`;
+
+    const ticket = montarTicket(code);
+    const ticketRef = db.collection("ingressos").doc(code);
+
+    tx.set(counterRef, { ultimo: proximo });
+    tx.set(ticketRef, ticket);
+    tx.set(reservaRef, {
+      code,
+      mpPaymentId: String(paymentId),
+      origem: "webhook",
+      criadoEm: new Date().toISOString(),
+    });
+
+    return { code, criadoAgora: true, ticket };
   });
-  return `FJ-${String(novo).padStart(4, "0")}`;
 }
 
 module.exports = async function handler(req, res) {
+  // O MP envia POST. Também aceita GET (ping de teste).
   if (req.method === "GET") return res.status(200).json({ ok: true });
   if (req.method !== "POST") return res.status(405).end();
 
-  let paymentId;
+  // Responde 200 rapidamente — MP reentrega se demorar/erro.
+  // Mesmo em erro lógico devolvemos 200 só DEPOIS de tratar, pra evitar loop infinito.
   try {
     const body = req.body || {};
-    paymentId =
+    const paymentId =
       body?.data?.id ||
       req.query?.["data.id"] ||
       req.query?.id ||
@@ -66,73 +102,21 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ignored: true });
     }
 
-    const paymentIdStr = String(paymentId);
     const payment = await fetchPayment(paymentId);
     const status = payment.status;
     const externalRef = payment.external_reference || "";
 
+    // Só emite ingresso quando aprovado
     if (status !== "approved") {
-      console.log("mp-webhook: status não-aprovado", { paymentId: paymentIdStr, status });
+      console.log("mp-webhook: status não-aprovado", { paymentId, status });
       return res.status(200).json({ ok: true, status });
     }
 
     const db = getDb();
 
-    // 🔒 Idempotência / UPSERT por mpPaymentId (busca aceita string OU number
-    // por segurança, caso existam ingressos antigos com o tipo errado)
-    const [dupStr, dupNum] = await Promise.all([
-      db.collection("ingressos").where("mpPaymentId", "==", paymentIdStr).limit(1).get(),
-      db.collection("ingressos").where("mpPaymentId", "==", Number(paymentIdStr)).limit(1).get(),
-    ]);
-    const existing = !dupStr.empty ? dupStr.docs[0] : (!dupNum.empty ? dupNum.docs[0] : null);
-
-    if (existing) {
-      const data = existing.data();
-      if (data.pagamentoConfirmado === true && data.statusPagamento === "approved") {
-        console.log("mp-webhook: já confirmado", { paymentId: paymentIdStr, code: existing.id });
-        return res.status(200).json({ ok: true, dedup: true });
-      }
-      // Atualiza ingresso pendente criado pelo front → marca como pago
-      await existing.ref.update({
-        mpPaymentId: paymentIdStr,
-        statusPagamento: "approved",
-        pagamentoConfirmado: true,
-        dataPagamento: new Date().toISOString(),
-        atualizadoPorWebhook: new Date().toISOString(),
-      });
-
-      // Incrementa contador do lote se ainda não foi contado
-      if (data.loteId && data.pagamentoConfirmado !== true) {
-        try {
-          await db.collection("lotes").doc(data.loteId).update({
-            ingressosAssociados: admin.firestore.FieldValue.increment(data.qty || 1),
-          });
-        } catch (e) {
-          console.warn("mp-webhook: falha increment lote", e.message);
-        }
-      }
-
-      // Envia e-mail se ainda não foi
-      if (data.emailEnviado !== true && (data.email || payment.payer?.email) && process.env.SEND_EMAIL_URL) {
-        await sendEmail({
-          to: data.email || payment.payer?.email,
-          nomeAluno: data.nomeAluno,
-          code: existing.id,
-          lote: data.type,
-          preco: `R$ ${Number(data.price || 0).toFixed(2).replace(".", ",")}`,
-        }).then(() =>
-          existing.ref.update({ emailEnviado: true, emailEnviadoEm: new Date().toISOString() }).catch(() => {})
-        ).catch((e) => console.error("mp-webhook: email upsert falhou", e.message));
-      }
-
-      console.log("mp-webhook: ingresso atualizado", { paymentId: paymentIdStr, code: existing.id });
-      return res.status(200).json({ ok: true, upserted: true });
-    }
-
-    // Não existe ingresso ainda — cria do zero.
-    // Resolve o usuário: external_reference deve ser o uid; fallback por e-mail.
+    // Resolve o usuário: external_reference deve ser o uid; fallback procura por e-mail
     let userDoc = null;
-    if (externalRef && !externalRef.startsWith("anon-")) {
+    if (externalRef) {
       const snap = await db.collection("usuarios").doc(externalRef).get();
       if (snap.exists) userDoc = { id: snap.id, ...snap.data() };
     }
@@ -145,77 +129,76 @@ module.exports = async function handler(req, res) {
       if (!q.empty) userDoc = { id: q.docs[0].id, ...q.docs[0].data() };
     }
 
-    if (!userDoc) {
-      // NÃO cria órfão. Retorna 500 → MP reentrega; admin pode reconciliar manualmente.
-      console.error("mp-webhook: dono não encontrado", {
-        paymentId: paymentIdStr,
-        externalRef,
-        payerEmail: payment.payer?.email,
-      });
-      return res.status(500).json({ error: "user_not_found", paymentId: paymentIdStr });
+    const nomeAluno =
+      userDoc?.nomeAluno ||
+      userDoc?.nomeResponsavel ||
+      payment.payer?.first_name ||
+      "Convidado";
+    const emailDestino = userDoc?.email || payment.payer?.email || "";
+
+    // 🔒 Criação atômica: se o cliente (cadastro.tsx) já criou o ingresso
+    // para este mesmo mpPaymentId um instante antes, a transação abaixo
+    // detecta a reserva existente e `criadoAgora` vem como false — não
+    // duplica nada, mesmo que as duas chamadas tenham chegado quase juntas.
+    const { code, criadoAgora, ticket } = await criarIngressoAtomico(
+      db,
+      paymentId,
+      (codeGerado) => ({
+        userId: userDoc?.id || externalRef || "",
+        nomeAluno,
+        type: "Acesso Geral",
+        qty: 1,
+        price: Number(payment.transaction_amount) || 0,
+        code: codeGerado,
+        criadoEm: new Date().toISOString(),
+        paymentMethod: "mercadopago",
+        mpPaymentId: String(paymentId),
+        statusPagamento: "approved",
+        turma: userDoc?.turma || "",
+        ano: userDoc?.ano || "",
+        isTest: false,
+        pagamentoConfirmado: true,
+        dataPagamento: new Date().toISOString(),
+        origem: "webhook",
+        payerEmailMp: payment.payer?.email || "",
+        payerCpfMp: payment.payer?.identification?.number || "",
+      })
+    );
+
+    if (!criadoAgora) {
+      console.log("mp-webhook: já existe ingresso (reserva atômica)", { paymentId, code });
+      return res.status(200).json({ ok: true, dedup: true, code });
     }
 
-    const nomeAluno =
-      userDoc.nomeAluno || userDoc.nomeResponsavel || payment.payer?.first_name || "Convidado";
-    const emailDestino = userDoc.email || payment.payer?.email || "";
+    console.log("mp-webhook: ingresso criado", { code, paymentId, userId: ticket.userId });
 
-    const code = await gerarCodigoIngresso(db);
-    const ticket = {
-      userId: userDoc.id,
-      nomeAluno,
-      type: "Acesso Geral",
-      qty: 1,
-      price: Number(payment.transaction_amount) || 0,
-      code,
-      criadoEm: new Date().toISOString(),
-      paymentMethod: "mercadopago",
-      mpPaymentId: paymentIdStr, // ✅ sempre string
-      statusPagamento: "approved",
-      turma: userDoc.turma || "",
-      ano: userDoc.ano || "",
-      isTest: false,
-      pagamentoConfirmado: true,
-      dataPagamento: new Date().toISOString(),
-      origem: "webhook",
-      email: emailDestino,
-      payerEmailMp: payment.payer?.email || "",
-      payerCpfMp: payment.payer?.identification?.number || "",
-    };
-    await db.collection("ingressos").doc(code).set(ticket);
-    console.log("mp-webhook: ingresso criado", { code, paymentId: paymentIdStr, userId: ticket.userId });
-
+    // Dispara o e-mail (não falha o webhook se o e-mail der erro — ingresso já está salvo)
     if (emailDestino && process.env.SEND_EMAIL_URL) {
       try {
-        await sendEmail({
-          to: emailDestino,
-          nomeAluno,
-          code,
-          lote: ticket.type,
-          preco: `R$ ${ticket.price.toFixed(2).replace(".", ",")}`,
+        await fetch(process.env.SEND_EMAIL_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: emailDestino,
+            nomeAluno,
+            code,
+            lote: ticket.type,
+            preco: `R$ ${ticket.price.toFixed(2).replace(".", ",")}`,
+          }),
         });
-        await db.collection("ingressos").doc(code).update({
-          emailEnviado: true,
-          emailEnviadoEm: new Date().toISOString(),
-        }).catch(() => {});
       } catch (e) {
         console.error("mp-webhook: erro ao enviar email", e.message);
       }
+    } else {
+      console.warn("mp-webhook: email não enviado (sem destino ou SEND_EMAIL_URL)", {
+        emailDestino,
+      });
     }
 
     return res.status(200).json({ ok: true, code });
   } catch (err) {
-    console.error("mp-webhook: exception", { paymentId, msg: err.message, stack: err.stack });
-    // 500 → MP reentrega. Não silencia mais.
-    return res.status(500).json({ error: err.message });
+    console.error("mp-webhook: exception", err);
+    // 200 mesmo em erro pra evitar tempestade de reentrega; logs ficam no Vercel.
+    return res.status(200).json({ ok: false, error: err.message });
   }
 };
-
-async function sendEmail(payload) {
-  const r = await fetch(process.env.SEND_EMAIL_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!r.ok) throw new Error(`send-email ${r.status}`);
-  return r;
-}
