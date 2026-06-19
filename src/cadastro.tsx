@@ -1400,6 +1400,13 @@ function CadastroAppInner({ onBack = () => {} }) {
   const handlePixPayment = async () => {
     setIsPaymentLoading(true);
 
+    if (!currentUser?.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(currentUser.email)) {
+      showToast("Atualize seu e-mail no perfil antes de pagar.");
+      setIsPaymentLoading(false);
+      setActiveTab("perfil");
+      return;
+    }
+
     // --- BYPASS PARA CONTA DE TESTE: gera o ingresso sem cobrar de fato ---
     if (currentUser?.isTest) {
       await handleMpSuccess({
@@ -1418,6 +1425,8 @@ function CadastroAppInner({ onBack = () => {} }) {
         transaction_amount: totalCart,
         description: "Ingresso - Festa Junina Brandão",
         payment_method_id: "pix",
+        external_reference: currentUser?.uid || "",
+        metadata: { user_id: currentUser?.uid || "", user_email: currentUser?.email || "" },
         payer: {
           email: currentUser?.email || "comprador@email.com",
           first_name: nomeCompleto.split(" ")[0],
@@ -1452,6 +1461,13 @@ function CadastroAppInner({ onBack = () => {} }) {
   // Gera token e paga com cartão via API transparente
   const handleCardPayment = async () => {
     setIsPaymentLoading(true);
+
+    if (!currentUser?.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(currentUser.email)) {
+      showToast("Atualize seu e-mail no perfil antes de pagar.");
+      setIsPaymentLoading(false);
+      setActiveTab("perfil");
+      return;
+    }
 
     // --- BYPASS PARA CONTA DE TESTE: gera o ingresso sem cobrar de fato ---
     if (currentUser?.isTest) {
@@ -1493,6 +1509,8 @@ function CadastroAppInner({ onBack = () => {} }) {
         description: "Ingresso - Festa Junina Brandão",
         installments: 1,
         payment_method_id: cardToken.payment_method_id || undefined,
+        external_reference: currentUser?.uid || "",
+        metadata: { user_id: currentUser?.uid || "", user_email: currentUser?.email || "" },
         payer: {
           email: currentUser?.email || "comprador@email.com",
           first_name: nomeCompletoCartao.split(" ")[0],
@@ -1633,10 +1651,11 @@ function CadastroAppInner({ onBack = () => {} }) {
         { id: uniqueCode, ...ticketData },
       ]);
 
-      // Envia e-mail com o ingresso (não envia para ingressos de teste)
-      if (!paymentData?.isTest) {
+      // Envia e-mail SÓ quando o pagamento está confirmado.
+      // Pagamentos pending/in_process serão entregues pelo webhook do MP quando aprovarem.
+      if (!paymentData?.isTest && estaPago) {
         try {
-          await fetch("https://festajunina-api.vercel.app/api/send-email", {
+          const emailRes = await fetch("https://festajunina-api.vercel.app/api/send-email", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1647,8 +1666,25 @@ function CadastroAppInner({ onBack = () => {} }) {
               preco: `R$ ${purchasedItem.preco.toFixed(2).replace(".", ",")}`,
             }),
           });
+          if (!emailRes.ok) {
+            const errBody = await emailRes.text();
+            console.error("E-mail falhou:", emailRes.status, errBody);
+            await updateDoc(doc(db, "ingressos", uniqueCode), {
+              emailEnviado: false,
+              emailErro: `${emailRes.status} ${errBody.slice(0, 200)}`,
+            }).catch(() => {});
+          } else {
+            await updateDoc(doc(db, "ingressos", uniqueCode), {
+              emailEnviado: true,
+              emailEnviadoEm: new Date().toISOString(),
+            }).catch(() => {});
+          }
         } catch (emailErr) {
-          console.warn("E-mail não enviado:", emailErr);
+          console.error("E-mail não enviado:", emailErr);
+          await updateDoc(doc(db, "ingressos", uniqueCode), {
+            emailEnviado: false,
+            emailErro: String(emailErr?.message || emailErr).slice(0, 200),
+          }).catch(() => {});
         }
       }
 
