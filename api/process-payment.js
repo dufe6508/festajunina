@@ -1,11 +1,9 @@
-// api/process-payment.js — versão corrigida
-// Correções:
-// 1. Injeta `notification_url` apontando para o webhook do MP (entrega server-side garantida)
-// 2. Injeta `external_reference` (uid do usuário) para o webhook achar o dono mesmo se
-//    o pagador no MP estiver com nome/CPF diferentes do titular do ingresso
-// 3. Propaga status real do MP (200/201/400) em vez de mascarar tudo como 500
-// 4. Log detalhado para debug de pagamentos órfãos
-// 5. Lê origin para montar a notification_url dinamicamente (dev/preview/prod)
+// api/process-payment.js — VERSÃO CORRIGIDA
+// Mudanças:
+//  1. notification_url usa PUBLIC_BASE_URL fixa (não muda em preview/prod)
+//  2. X-Idempotency-Key NÃO inclui o token MP (que é único por clique) —
+//     usa external_reference + valor → cliques duplicados reaproveitam o mesmo pagamento
+//  3. Mantém propagação do status real do MP
 
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
@@ -27,12 +25,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const origin =
-      req.headers.origin ||
+    // URL pública FIXA do webhook — defina PUBLIC_BASE_URL no Vercel
+    // (ex: https://festajunina-brandao.vercel.app). Fallback usa o host atual,
+    // mas em preview deploys isso muda — sempre prefira a env var.
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL ||
       (req.headers.host ? `https://${req.headers.host}` : "");
 
-    // Aceita external_reference vindo do cliente (uid do usuário logado).
-    // Se não vier, gera um para rastreabilidade.
     const incoming = req.body || {};
     const externalRef =
       incoming.external_reference ||
@@ -45,12 +44,9 @@ export default async function handler(req, res) {
       metadata: {
         ...(incoming.metadata || {}),
         user_id: incoming.metadata?.user_id || externalRef,
-        origin,
+        origin: baseUrl,
       },
-      // Webhook que vai garantir a entrega mesmo se o cliente fechar a aba
-      notification_url:
-        incoming.notification_url ||
-        (origin ? `${origin}/api/mp-webhook` : undefined),
+      notification_url: baseUrl ? `${baseUrl}/api/mp-webhook` : undefined,
     };
 
     const response = await fetch("https://api.mercadopago.com/v1/payments", {
@@ -58,9 +54,10 @@ export default async function handler(req, res) {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-        // Idempotência estável: se o cliente reenviar a mesma intenção com o
-        // mesmo external_reference, o MP devolve o mesmo pagamento em vez de criar outro.
-        "X-Idempotency-Key": `${externalRef}-${incoming.transaction_amount || 0}-${incoming.payment_method_id || incoming.token || "x"}`,
+        // Idempotência ESTÁVEL: dois cliques rápidos do MESMO usuário pelo
+        // MESMO valor devolvem o mesmo pagamento (não cobra duas vezes).
+        // Antes a chave incluía o token, que é único por tentativa → falhava.
+        "X-Idempotency-Key": `${externalRef}-${incoming.transaction_amount || 0}-${incoming.payment_method_id || "x"}`,
       },
       body: JSON.stringify(payload),
     });
@@ -73,7 +70,6 @@ export default async function handler(req, res) {
         external_reference: externalRef,
         mp: data,
       });
-      // Repassa o status real do MP (não mascara como 500 — o front precisa saber)
       return res.status(response.status).json({
         error: data.message || "Erro ao processar pagamento",
         details: data,
