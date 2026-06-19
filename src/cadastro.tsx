@@ -2509,7 +2509,7 @@ export default function CadastroApp({ onBack = () => {} }) {
                         const vendidos = Number(batch.vendidos) || 0;
                         const restantes = Math.max(0, limite - vendidos);
                         const pct = limite > 0 ? Math.min(100, (vendidos / limite) * 100) : 0;
-                        const esgotado = limite > 0 && vendidos >= limite;
+                        const esgotado = batch.esgotado === true || (limite > 0 && vendidos >= limite);
                         const bloqueado = !!batch.bloqueadoParaAluno;
                         const indisponivel = esgotado || bloqueado;
                         return (
@@ -2552,6 +2552,13 @@ export default function CadastroApp({ onBack = () => {} }) {
                                   .toFixed(2)
                                   .replace(".", ",")}
                               </p>
+
+                              {esgotado && !bloqueado && (
+                                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
+                                  <AlertCircle className="h-5 w-5 shrink-0" />
+                                  Este lote foi esgotado. Fique de olho em novos lotes!
+                                </div>
+                              )}
 
                                {purchasedTickets.length > 0 && (
                                 <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm flex items-center gap-3 mt-6">
