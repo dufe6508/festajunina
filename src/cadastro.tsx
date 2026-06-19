@@ -407,6 +407,7 @@ export default function CadastroApp({ onBack = () => {} }) {
   const [currentUser, setCurrentUser] = useState(null);
 
   const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
+  const cartRef = useRef(cart); // Ref para evitar closure stale no polling do PIX
 
   // Estados dos Lotes Visíveis
   const [batches, setBatches] = useState([]);
@@ -415,6 +416,7 @@ export default function CadastroApp({ onBack = () => {} }) {
   // Carrinho refatorado para suportar Lotes por ID
   // Formato: { [batchId]: { qty: number, nome: string, preco: number } }
   const [cart, setCart] = useState({});
+  useEffect(() => { cartRef.current = cart; }, [cart]);
   const cartItems = Object.values(cart);
   const totalCart = cartItems.reduce(
     (acc, item) => acc + item.qty * item.preco,
@@ -1282,20 +1284,15 @@ export default function CadastroApp({ onBack = () => {} }) {
 
     try {
       const cpfClean = (currentUser?.cpf || "").replace(/\D/g, "");
+      const nomeCompleto = currentUser?.nomeAluno || currentUser?.nomeResponsavel || "Comprador";
       const body = {
         transaction_amount: totalCart,
         description: "Ingresso - Festa Junina Brandão",
         payment_method_id: "pix",
         payer: {
           email: currentUser?.email || "comprador@email.com",
-          first_name: (currentUser?.nomeResponsavel || "Comprador").split(
-            " "
-          )[0],
-          last_name:
-            (currentUser?.nomeResponsavel || "")
-              .split(" ")
-              .slice(1)
-              .join(" ") || ".",
+          first_name: nomeCompleto.split(" ")[0],
+          last_name: nomeCompleto.split(" ").slice(1).join(" ") || ".",
           identification: { type: "CPF", number: cpfClean },
         },
       };
@@ -1360,6 +1357,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       }
 
       const cpfClean = (currentUser?.cpf || "").replace(/\D/g, "");
+      const nomeCompletoCartao = currentUser?.nomeAluno || currentUser?.nomeResponsavel || "Comprador";
       const body = {
         transaction_amount: totalCart,
         token: cardToken.id,
@@ -1368,6 +1366,8 @@ export default function CadastroApp({ onBack = () => {} }) {
         payment_method_id: cardToken.payment_method_id || undefined,
         payer: {
           email: currentUser?.email || "comprador@email.com",
+          first_name: nomeCompletoCartao.split(" ")[0],
+          last_name: nomeCompletoCartao.split(" ").slice(1).join(" ") || ".",
           identification: { type: "CPF", number: cpfClean },
         },
       };
@@ -1447,8 +1447,10 @@ export default function CadastroApp({ onBack = () => {} }) {
 
       const uniqueCode = await gerarCodigoIngresso();
 
-      // Resgata o nome do lote que estava no carrinho
-      const cartValues = Object.values(cart);
+      // Resgata o nome do lote que estava no carrinho.
+      // Usa cartRef.current (não cart) para garantir o valor mais recente
+      // mesmo dentro de callbacks assíncronos / closures do polling do PIX.
+      const cartValues = Object.values(cartRef.current);
       const purchasedItem = cartValues[0] || {
         nome: "Acesso Geral",
         preco: 15,
@@ -1562,6 +1564,7 @@ export default function CadastroApp({ onBack = () => {} }) {
       if (status === "approved") {
         setPixStatus("approved");
         clearInterval(interval);
+        setPixData(null); // evita novo disparo do useEffect enquanto o ingresso é salvo
         await handleMpSuccess({ paymentId: pixData.paymentId, status: "approved" });
       } else if (status === "rejected" || status === "cancelled") {
         setPixStatus(status);
