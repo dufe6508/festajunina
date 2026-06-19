@@ -118,21 +118,27 @@ const findUserIdByCpf = async (db, cpfDigits) => {
   }
 };
 
-// Gera um código único buscando o menor número disponível.
-// Lê todos os ingressos existentes, monta o conjunto de números já usados
-// e retorna o primeiro inteiro >= 1 que ainda não esteja ocupado.
-// Assim, ao apagar FJ-0003, o próximo criado recebe FJ-0003.
+// Gera um código único usando o MESMO contador transacional ("config/ticketCounter")
+// que o fluxo de checkout público (cadastro1.tsx) usa. Antes, este admin gerava
+// o código procurando o menor número "livre" varrendo a coleção "ingressos" — um
+// sistema de numeração totalmente separado do contador usado pelo checkout.
+// Isso permitia que o admin e um cliente pagando ao mesmo tempo gerassem o MESMO
+// código (ex: ambos "FJ-0001"), e o segundo "setDoc" SOBRESCREVIA o primeiro
+// ingresso no Firestore — fazendo um ingresso desaparecer silenciosamente da DB
+// (por isso o admin via menos ingressos do que o real, tanto nos Lotes quanto
+// nas Dashboards, e o contador não subia corretamente).
+// Usar a transação garante que cada chamada — venha do admin ou do checkout —
+// recebe um número sequencial exclusivo, sem nunca colidir.
 const generateTicketCode = async (db) => {
-  const ingressosSnap = await getDocs(collection(db, "ingressos"));
-  const usados = new Set();
-  ingressosSnap.forEach((d) => {
-    const code = d.data().code || "";
-    const m = code.match(/^(?:#?FJ-?)(\d+)$/i);
-    if (m) usados.add(parseInt(m[1], 10));
+  const counterRef = doc(db, "config", "ticketCounter");
+  const novoNumero = await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(counterRef);
+    const atual = snap.exists() ? snap.data().ultimo : 0;
+    const proximo = atual + 1;
+    transaction.set(counterRef, { ultimo: proximo });
+    return proximo;
   });
-  let n = 1;
-  while (usados.has(n)) n++;
-  return `FJ-${String(n).padStart(4, "0")}`;
+  return `FJ-${String(novoNumero).padStart(4, "0")}`;
 };
 
 // Nova formatação de data para seguir o padrão visual: "14/06/2026 às 01:44"
