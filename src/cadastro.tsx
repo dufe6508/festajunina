@@ -41,6 +41,7 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  fetchSignInMethodsForEmail
 } from "firebase/auth";
 import {
   getFirestore,
