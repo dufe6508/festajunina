@@ -1063,7 +1063,7 @@ export default function CadastroApp({ onBack = () => {} }) {
     }
   };
 
-  // Completar perfil (para quem loga com Google)
+  // Completar perfil (para quem loga com Google ou cai na race condition do cadastro e-mail)
   const handleCompleteProfile = async (e) => {
     e.preventDefault();
     const eErrors = {};
@@ -1071,8 +1071,8 @@ export default function CadastroApp({ onBack = () => {} }) {
     if (formData.telefone.replace(/\D/g, "").length < 10)
       eErrors.telefone = "Telefone inválido";
     // ano, turma e nomeAluno vêm automaticamente do CPF lookup
-    if (cpfLookupStatus !== "found") {
-      eErrors.cpf = "CPF não verificado na lista de alunos";
+    if (cpfLookupStatus !== "found" && cpfLookupStatus !== "pai_found") {
+      eErrors.cpf = "CPF não verificado na lista de alunos ou responsáveis";
     }
 
     setErrors(eErrors);
@@ -1081,14 +1081,19 @@ export default function CadastroApp({ onBack = () => {} }) {
 
     setIsLoading(true);
     setCpfNotFound(false);
+
+    const isPai = cpfLookupStatus === "pai_found";
+
     try {
       if (!currentUser?.isTest) {
-        // Verifica se o CPF está na lista de alunos do sistema
-        const alunoExiste = await checkCpfInStudents(formData.cpf);
-        if (!alunoExiste) {
-          setIsLoading(false);
-          setCpfNotFound(true);
-          return;
+        if (!isPai) {
+          // Verifica se o CPF está na lista de alunos do sistema
+          const alunoExiste = await checkCpfInStudents(formData.cpf);
+          if (!alunoExiste) {
+            setIsLoading(false);
+            setCpfNotFound(true);
+            return;
+          }
         }
 
         const qCpf = query(
@@ -1096,20 +1101,32 @@ export default function CadastroApp({ onBack = () => {} }) {
           where("cpf", "==", formData.cpf)
         );
         const snapCpf = await getDocs(qCpf);
-        if (!snapCpf.empty) {
+        // Se o único doc com esse CPF for o próprio usuário, tudo bem (race condition do e-mail)
+        const duplicado = snapCpf.docs.some((d) => d.id !== currentUser?.uid);
+        if (duplicado) {
           setIsLoading(false);
           return showToast("Este CPF já está cadastrado em outra conta.");
         }
       }
 
-      const userData = {
-        nomeResponsavel: formData.nomeAluno || currentUser.nomeResponsavel,
-        cpf: formData.cpf,
-        telefone: formData.telefone,
-        ano: formData.ano,
-        turma: formData.turma,
-        nomeAluno: formData.nomeAluno,
-      };
+      const userData = isPai
+        ? {
+            nomeResponsavel: cpfPaiData?.nome || formData.nomeResponsavel,
+            cpf: formData.cpf,
+            telefone: formData.telefone,
+            email: currentUser.email,
+            tipo: "pai",
+            relacao: cpfPaiData?.relacao || "responsavel",
+          }
+        : {
+            nomeResponsavel: formData.nomeAluno || currentUser.nomeResponsavel,
+            cpf: formData.cpf,
+            telefone: formData.telefone,
+            ano: formData.ano,
+            turma: formData.turma,
+            nomeAluno: formData.nomeAluno,
+            tipo: "aluno",
+          };
 
       if (currentUser?.isTest) {
         // Conta de teste: o documento ainda não existe na 1ª vez, então usamos setDoc/merge
@@ -1119,7 +1136,12 @@ export default function CadastroApp({ onBack = () => {} }) {
           { merge: true }
         );
       } else {
-        await updateDoc(doc(db, "usuarios", currentUser.uid), userData);
+        // Usa setDoc com merge para cobrir tanto update quanto criação (race condition)
+        await setDoc(
+          doc(db, "usuarios", currentUser.uid),
+          { ...userData, criadoEm: new Date().toISOString() },
+          { merge: true }
+        );
       }
 
       setIsSuccess(true);
