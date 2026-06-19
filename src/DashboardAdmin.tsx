@@ -652,8 +652,8 @@ export default function DashboardAdmin({ currentUser, onLogout, onBack }) {
           const count = allT.filter(
             (t) => t.loteId === b.id || t.type === b.nome
           ).length;
-          // Se o campo ainda não existe ou está desatualizado, corrige
-          if (b.ingressosAssociados == null || b.ingressosAssociados < count) {
+          // Corrige sempre que o contador divergir da contagem real (inclusão OU exclusão)
+          if (b.ingressosAssociados == null || b.ingressosAssociados !== count) {
             updateDoc(doc(db, "lotes", b.id), { ingressosAssociados: count }).catch(() => {});
             return { ...b, ingressosAssociados: count };
           }
