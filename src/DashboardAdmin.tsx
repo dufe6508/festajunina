@@ -3639,6 +3639,13 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
                             {getLoteName(t)}
                           </span>
+                          {(t.ano || t.turma) && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800">
+                              {t.ano ? `${t.ano}º Ano` : ""}
+                              {t.ano && t.turma ? " · " : ""}
+                              {t.turma ? `Turma ${t.turma}` : ""}
+                            </span>
+                          )}
                           <span className="text-zinc-600 text-xs">
                             {formatDate(t.criadoEm)}
                           </span>
@@ -5136,6 +5143,32 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                   })}
                 </div>
               )}
+
+              {/* Aviso de ingressos sem lote correspondente (não contabilizados em nenhum card acima) */}
+              {!loadingBatches && (() => {
+                const orfaos = (allTickets || []).filter(
+                  (t) => !batches.some((b) => b.id === t.loteId || b.nome === t.type)
+                );
+                if (orfaos.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-3 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl px-5 py-4">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-amber-300 text-sm font-semibold">
+                        {orfaos.length} ingresso{orfaos.length !== 1 ? "s" : ""} sem lote
+                        correspondente
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Esses ingressos foram criados com um "loteId" que não existe
+                        mais nesta lista (ex: lote excluído, ou ingresso vindo de outro
+                        fluxo de compra que não preencheu o lote). Por isso eles não
+                        somam em nenhum card acima e a soma dos lotes não bate com o
+                        total de "Vendidos" da Visão Geral.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
           {/* ── ALUNOS (sub-abas) ── */}
