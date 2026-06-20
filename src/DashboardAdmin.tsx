@@ -41,6 +41,8 @@ import {
   Unlink,
   Lock,
   Unlock,
+  Bell,
+  LogIn,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
 import {
@@ -315,6 +317,17 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
 
   // Modais GERAIS
   const [confirmLogoutModal, setConfirmLogoutModal] = useState(false);
+
+  // Notificações (logins e compras)
+  const [loginNotifs, setLoginNotifs] = useState([]);
+  const [notifSubTab, setNotifSubTab] = useState("logins");
+  const [lastReadAt, setLastReadAt] = useState(() => {
+    try {
+      return localStorage.getItem("admin_notif_lastRead") || null;
+    } catch {
+      return null;
+    }
+  });
 
   // Scanner e Ingressos
   const [scanCode, setScanCode] = useState("");
@@ -656,6 +669,48 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
       fetchBatches();
     }
   }, [activeTab]);
+
+  // ─── NOTIFICAÇÕES: busca eventos de login (coleção "logins") ───
+  const fetchLoginNotifs = async () => {
+    try {
+      const snap = await getDocs(collection(db, "logins"));
+      const eventos = [];
+      snap.forEach((d) => eventos.push({ id: d.id, ...d.data() }));
+      eventos.sort(
+        (a, b) => new Date(b.criadoEm || 0) - new Date(a.criadoEm || 0)
+      );
+      setLoginNotifs(eventos);
+    } catch {
+      // Coleção pode ainda não existir — ignora silenciosamente
+    }
+  };
+
+  useEffect(() => {
+    fetchLoginNotifs();
+    const interval = setInterval(fetchLoginNotifs, 20000); // atualiza a cada 20s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Notificações de compra derivadas dos próprios ingressos (já carregados)
+  const purchaseNotifs = (allTickets || [])
+    .filter((t) => t.criadoEm)
+    .slice()
+    .sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
+
+  const isUnread = (iso) =>
+    !lastReadAt || (iso && new Date(iso) > new Date(lastReadAt));
+
+  const unreadLoginCount = loginNotifs.filter((n) => isUnread(n.criadoEm)).length;
+  const unreadPurchaseCount = purchaseNotifs.filter((t) => isUnread(t.criadoEm)).length;
+  const totalUnreadNotifs = unreadLoginCount + unreadPurchaseCount;
+
+  const markAllNotifsRead = () => {
+    const now = new Date().toISOString();
+    setLastReadAt(now);
+    try {
+      localStorage.setItem("admin_notif_lastRead", now);
+    } catch {}
+  };
 
   const showToast = (message, type = "error") => {
     setToast({ message, type });
@@ -3322,6 +3377,33 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
               </span>
             </button>
           </div>
+
+          {/* Botão Notificações (Sino) */}
+          <button
+            onClick={() => {
+              setActiveTab("admin_notifications");
+              if (window.innerWidth < 1024) setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-4 px-3 lg:px-0 lg:justify-center rounded-xl transition-all h-12 text-sm font-medium whitespace-nowrap relative ${
+              activeTab === "admin_notifications"
+                ? "bg-white text-black"
+                : "text-zinc-500 hover:bg-zinc-900 hover:text-white"
+            } ${sidebarOpen ? "lg:px-3 lg:justify-start" : ""}`}
+          >
+            <span className="relative shrink-0">
+              <Bell className="h-5 w-5 shrink-0" />
+              {totalUnreadNotifs > 0 && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-[#0a0a0a]" />
+              )}
+            </span>
+            <span
+              className={
+                sidebarOpen ? "opacity-100 block" : "lg:hidden opacity-0 w-0"
+              }
+            >
+              Notificações
+            </span>
+          </button>
         </nav>
         <div className="p-4 border-t border-zinc-800 shrink-0 space-y-2">
           <button
@@ -3385,6 +3467,8 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 ? "Gestão de Lotes"
                 : activeTab === "admin_groups"
                 ? "Alunos"
+                : activeTab === "admin_notifications"
+                ? "Notificações"
                 : "Listas de Presença"}
             </h2>
           </div>
@@ -3404,6 +3488,145 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         </header>
 
         <main className="flex-1 overflow-y-auto bg-black p-4 sm:p-6 lg:p-8">
+          {/* ── NOTIFICAÇÕES ── */}
+          {activeTab === "admin_notifications" && (
+            <div className="max-w-2xl mx-auto animate-in fade-in duration-300">
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-white font-bold text-lg tracking-tight flex items-center gap-2">
+                    <Bell className="w-5 h-5" /> Notificações
+                  </h2>
+                  <p className="text-zinc-500 text-xs mt-1">
+                    Logins de usuários e compras de ingressos em tempo real.
+                  </p>
+                </div>
+                <button
+                  onClick={markAllNotifsRead}
+                  disabled={totalUnreadNotifs === 0}
+                  className="h-10 px-4 rounded-xl bg-white text-black text-xs font-bold uppercase tracking-widest hover:bg-zinc-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                  Marcar tudo como lido
+                </button>
+              </div>
+
+              {/* Sub-abas */}
+              <div className="flex gap-2 mb-5">
+                <button
+                  onClick={() => setNotifSubTab("logins")}
+                  className={`flex-1 h-11 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                    notifSubTab === "logins"
+                      ? "bg-white text-black"
+                      : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white"
+                  }`}
+                >
+                  <LogIn className="w-4 h-4" /> Logins
+                  {unreadLoginCount > 0 && (
+                    <span className="ml-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">
+                      {unreadLoginCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setNotifSubTab("compras")}
+                  className={`flex-1 h-11 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                    notifSubTab === "compras"
+                      ? "bg-white text-black"
+                      : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white"
+                  }`}
+                >
+                  <Ticket className="w-4 h-4" /> Compras
+                  {unreadPurchaseCount > 0 && (
+                    <span className="ml-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">
+                      {unreadPurchaseCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Lista */}
+              <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60 overflow-hidden">
+                {notifSubTab === "logins" ? (
+                  loginNotifs.length === 0 ? (
+                    <div className="py-14 flex flex-col items-center gap-3 text-zinc-600">
+                      <LogIn className="w-9 h-9 opacity-20" />
+                      <p className="text-sm">Nenhum login registrado ainda.</p>
+                    </div>
+                  ) : (
+                    loginNotifs.map((n) => (
+                      <div
+                        key={n.id}
+                        className="flex items-center gap-3 px-5 py-4 hover:bg-zinc-900/40 transition-colors"
+                      >
+                        <div
+                          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                            isUnread(n.criadoEm)
+                              ? "bg-blue-500/15 border border-blue-500/30"
+                              : "bg-zinc-800 border border-zinc-700"
+                          }`}
+                        >
+                          <LogIn
+                            className={`w-4 h-4 ${
+                              isUnread(n.criadoEm) ? "text-blue-400" : "text-zinc-500"
+                            }`}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-semibold truncate">
+                            {n.nome || n.nomeAluno || "Usuário"} fez login
+                          </p>
+                          <p className="text-zinc-500 text-xs mt-0.5">
+                            {formatDate(n.criadoEm)}
+                          </p>
+                        </div>
+                        {isUnread(n.criadoEm) && (
+                          <span className="w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                        )}
+                      </div>
+                    ))
+                  )
+                ) : purchaseNotifs.length === 0 ? (
+                  <div className="py-14 flex flex-col items-center gap-3 text-zinc-600">
+                    <Ticket className="w-9 h-9 opacity-20" />
+                    <p className="text-sm">Nenhuma compra registrada ainda.</p>
+                  </div>
+                ) : (
+                  purchaseNotifs.map((t) => (
+                    <div
+                      key={t.id}
+                      className="flex items-center gap-3 px-5 py-4 hover:bg-zinc-900/40 transition-colors"
+                    >
+                      <div
+                        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                          isUnread(t.criadoEm)
+                            ? "bg-green-500/15 border border-green-500/30"
+                            : "bg-zinc-800 border border-zinc-700"
+                        }`}
+                      >
+                        <Ticket
+                          className={`w-4 h-4 ${
+                            isUnread(t.criadoEm) ? "text-green-400" : "text-zinc-500"
+                          }`}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold truncate">
+                          {t.nomeAluno || "Alguém"} comprou um ingresso
+                          {t.type ? ` (${t.type})` : ""}
+                        </p>
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          {formatDate(t.criadoEm)} · {t.code || t.id}
+                        </p>
+                      </div>
+                      {isUnread(t.criadoEm) && (
+                        <span className="w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── SCANNER ── */}
           {activeTab === "admin_scanner" && (
             <div className="max-w-xl mx-auto flex flex-col items-center justify-center min-h-[70vh] animate-in fade-in zoom-in duration-300">
