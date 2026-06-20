@@ -534,6 +534,7 @@ function CadastroAppInner({ onBack = () => {} }) {
     name: "",
     expiry: "",
     cvv: "",
+    cpf: "",
   });
 
   const [purchasedTickets, setPurchasedTickets] = useState([]);
@@ -1387,6 +1388,13 @@ const checkCpfInResponsaveis = async (
         .slice(0, 4)
         .replace(/^(\d{2})(\d{0,2})/, (_, p1, p2) => (p2 ? `${p1}/${p2}` : p1));
     if (name === "cvv") value = value.replace(/\D/g, "").slice(0, 4);
+    if (name === "cpf")
+      value = value
+        .replace(/\D/g, "")
+        .slice(0, 11)
+        .replace(/(\d{3})(\d)/, "$1.$2")
+        .replace(/(\d{3})(\d)/, "$1.$2")
+        .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
     setCardData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -1486,6 +1494,21 @@ const checkCpfInResponsaveis = async (
       const MercadoPago = await loadMpSdk();
       const mp = new MercadoPago(MP_PUBLIC_KEY, { locale: "pt-BR" });
 
+      // IMPORTANTE: a identificação (nome e CPF) enviada para o Mercado Pago
+      // precisa ser do TITULAR DO CARTÃO, não da pessoa logada no site.
+      // É muito comum o aluno comprar usando o cartão de um responsável —
+      // antes, o código sempre enviava o CPF/nome de quem estava logado
+      // (currentUser), mesmo quando o cartão era de outra pessoa. Isso causa
+      // divergência entre o CPF informado e o CPF real do titular do cartão,
+      // o que o banco emissor/Mercado Pago frequentemente recusa por
+      // suspeita de fraude — aparecendo pro usuário como "erro no cartão".
+      const cpfTitularCartao = (cardData.cpf || "").replace(/\D/g, "");
+      if (cpfTitularCartao.length !== 11) {
+        showToast("Informe o CPF do titular do cartão (11 dígitos).");
+        setIsPaymentLoading(false);
+        return;
+      }
+
       const [expMonth, expYear] = cardData.expiry.split("/");
       const cardToken = await mp.createCardToken({
         cardNumber: cardData.number.replace(/\s/g, ""),
@@ -1494,7 +1517,7 @@ const checkCpfInResponsaveis = async (
         cardExpirationYear: `20${expYear}`,
         securityCode: cardData.cvv,
         identificationType: "CPF",
-        identificationNumber: (currentUser?.cpf || "").replace(/\D/g, ""),
+        identificationNumber: cpfTitularCartao,
       });
 
       if (!cardToken?.id) {
@@ -1503,8 +1526,7 @@ const checkCpfInResponsaveis = async (
         return;
       }
 
-      const cpfClean = (currentUser?.cpf || "").replace(/\D/g, "");
-      const nomeCompletoCartao = currentUser?.nomeAluno || currentUser?.nomeResponsavel || "Comprador";
+      const nomeCompletoCartao = cardData.name.trim() || "Comprador";
       const body = {
         transaction_amount: totalCart,
         token: cardToken.id,
@@ -1517,7 +1539,7 @@ const checkCpfInResponsaveis = async (
           email: currentUser?.email || "comprador@email.com",
           first_name: nomeCompletoCartao.split(" ")[0],
           last_name: nomeCompletoCartao.split(" ").slice(1).join(" ") || ".",
-          identification: { type: "CPF", number: cpfClean },
+          identification: { type: "CPF", number: cpfTitularCartao },
         },
       };
 
@@ -3711,6 +3733,23 @@ const checkCpfInResponsaveis = async (
                           className="mt-1 !h-12 !rounded-lg !border-[#DDDDDD] !bg-white !text-[#333333] uppercase focus-visible:!ring-[#009EE3]"
                         />
                       </div>
+                      <div>
+                        <Label className="!text-[#666666]">
+                          CPF do titular do cartão
+                        </Label>
+                        <Input
+                          name="cpf"
+                          value={cardData.cpf}
+                          onChange={handleCardChange}
+                          placeholder="000.000.000-00"
+                          maxLength={14}
+                          className="mt-1 !h-12 !rounded-lg !border-[#DDDDDD] !bg-white !text-[#333333] font-mono focus-visible:!ring-[#009EE3]"
+                        />
+                        <p className="mt-1 text-xs text-[#999999]">
+                          Deve ser o CPF de quem é o titular do cartão (pode ser
+                          diferente do CPF do aluno/responsável cadastrado).
+                        </p>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label className="!text-[#666666]">Validade</Label>
@@ -3745,6 +3784,7 @@ const checkCpfInResponsaveis = async (
                         !cardData.name ||
                         !cardData.expiry ||
                         !cardData.cvv ||
+                        cardData.cpf.replace(/\D/g, "").length !== 11 ||
                         isPaymentLoading
                       }
                     >
