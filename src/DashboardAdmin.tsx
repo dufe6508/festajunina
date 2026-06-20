@@ -665,7 +665,11 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   useEffect(() => {
     // Sempre busca os ingressos para que a contagem dos lotes seja precisa
     fetchAllTicketsForAdmin();
-    if (activeTab === "admin_batches" || activeTab === "admin_add_ticket") {
+    if (
+      activeTab === "admin_batches" ||
+      activeTab === "admin_add_ticket" ||
+      activeTab === "admin_notifications"
+    ) {
       fetchBatches();
     }
   }, [activeTab]);
@@ -699,6 +703,11 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
 
   const isUnread = (iso) =>
     !lastReadAt || (iso && new Date(iso) > new Date(lastReadAt));
+
+  const getLoteName = (t) => {
+    const lote = batches.find((b) => b.id === t.loteId);
+    return lote?.nome || t.type || "—";
+  };
 
   const unreadLoginCount = loginNotifs.filter((n) => isUnread(n.criadoEm)).length;
   const unreadPurchaseCount = purchaseNotifs.filter((t) => isUnread(t.criadoEm)).length;
@@ -3555,31 +3564,38 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                     loginNotifs.map((n) => (
                       <div
                         key={n.id}
-                        className="flex items-center gap-3 px-5 py-4 hover:bg-zinc-900/40 transition-colors"
+                        className={`flex items-center gap-4 px-5 py-4 transition-colors ${
+                          isUnread(n.criadoEm)
+                            ? "bg-blue-500/[0.04] hover:bg-blue-500/[0.07]"
+                            : "hover:bg-zinc-900/40"
+                        }`}
                       >
                         <div
-                          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                          className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
                             isUnread(n.criadoEm)
                               ? "bg-blue-500/15 border border-blue-500/30"
                               : "bg-zinc-800 border border-zinc-700"
                           }`}
                         >
                           <LogIn
-                            className={`w-4 h-4 ${
+                            className={`w-5 h-5 ${
                               isUnread(n.criadoEm) ? "text-blue-400" : "text-zinc-500"
                             }`}
                           />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-semibold truncate">
-                            {n.nome || n.nomeAluno || "Usuário"} fez login
+                          <p className="text-white text-sm font-semibold leading-snug">
+                            {n.nome || n.nomeAluno || "Usuário"}{" "}
+                            <span className="text-zinc-400 font-normal">
+                              fez login
+                            </span>
                           </p>
-                          <p className="text-zinc-500 text-xs mt-0.5">
+                          <p className="text-zinc-600 text-xs mt-1.5">
                             {formatDate(n.criadoEm)}
                           </p>
                         </div>
                         {isUnread(n.criadoEm) && (
-                          <span className="w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                          <span className="w-2 h-2 bg-blue-400 rounded-full shrink-0 self-start mt-1.5 shadow-[0_0_8px_rgba(96,165,250,0.6)]" />
                         )}
                       </div>
                     ))
@@ -3593,32 +3609,47 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                   purchaseNotifs.map((t) => (
                     <div
                       key={t.id}
-                      className="flex items-center gap-3 px-5 py-4 hover:bg-zinc-900/40 transition-colors"
+                      className={`flex items-center gap-4 px-5 py-4 transition-colors ${
+                        isUnread(t.criadoEm)
+                          ? "bg-green-500/[0.04] hover:bg-green-500/[0.07]"
+                          : "hover:bg-zinc-900/40"
+                      }`}
                     >
                       <div
-                        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                        className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
                           isUnread(t.criadoEm)
                             ? "bg-green-500/15 border border-green-500/30"
                             : "bg-zinc-800 border border-zinc-700"
                         }`}
                       >
                         <Ticket
-                          className={`w-4 h-4 ${
+                          className={`w-5 h-5 ${
                             isUnread(t.criadoEm) ? "text-green-400" : "text-zinc-500"
                           }`}
                         />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-semibold truncate">
-                          {t.nomeAluno || "Alguém"} comprou um ingresso
-                          {t.type ? ` (${t.type})` : ""}
+                        <p className="text-white text-sm font-semibold leading-snug">
+                          {t.nomeAluno || "Alguém"}{" "}
+                          <span className="text-zinc-400 font-normal">
+                            comprou um ingresso
+                          </span>
                         </p>
-                        <p className="text-zinc-500 text-xs mt-0.5">
-                          {formatDate(t.criadoEm)} · {t.code || t.id}
-                        </p>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
+                            {getLoteName(t)}
+                          </span>
+                          <span className="text-zinc-600 text-xs">
+                            {formatDate(t.criadoEm)}
+                          </span>
+                          <span className="text-zinc-700 text-xs">·</span>
+                          <span className="text-zinc-500 font-mono text-xs">
+                            {t.code || t.id}
+                          </span>
+                        </div>
                       </div>
                       {isUnread(t.criadoEm) && (
-                        <span className="w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                        <span className="w-2 h-2 bg-green-400 rounded-full shrink-0 self-start mt-1.5 shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
                       )}
                     </div>
                   ))
@@ -4897,11 +4928,10 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                     const totalNaDB = (allTickets || []).filter(
                       (t) => t.loteId === batch.id || t.type === batch.nome
                     ).length;
-                    // Usa o contador persistido no lote (atualizado em toda associação/exclusão).
-                    // Faz fallback para a contagem client-side enquanto não há o campo no doc.
-                    const totalExibido = batch.ingressosAssociados != null
-                      ? Math.max(batch.ingressosAssociados, totalNaDB)
-                      : totalNaDB;
+                    // Sempre exibe a contagem real lida da DB (coleção "ingressos"),
+                    // em vez do contador persistido no lote, que pode ficar
+                    // desatualizado/incorreto após edições, exclusões ou associações.
+                    const totalExibido = totalNaDB;
                     const limite = Number(batch.quantidade) || 0;
                     const pct = limite > 0 ? Math.min(100, (totalExibido / limite) * 100) : 0;
                     const esgotado = batch.esgotado === true || (limite > 0 && totalExibido >= limite);
