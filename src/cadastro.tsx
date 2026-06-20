@@ -177,34 +177,7 @@ class AppErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       if (this.state.isTranslateError) {
-        return (
-          <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
-            <div className="max-w-sm space-y-4">
-              <p className="text-white font-bold text-lg">
-                Desative a tradução automática
-              </p>
-              <p className="text-zinc-400 text-sm">
-                Detectamos que a tradução automática do navegador (Google
-                Tradutor) está ativa nesta página, e ela conflita com o
-                funcionamento do app. Desative a tradução e recarregue:
-              </p>
-              <div className="text-left text-zinc-400 text-sm space-y-2 bg-zinc-900 rounded-xl p-4">
-                <p className="text-white font-semibold">No Chrome (Android):</p>
-                <p>Toque nos 3 pontinhos (⋮) → desmarque "Traduzir página".</p>
-                <p className="text-white font-semibold pt-2">No Safari (iPhone):</p>
-                <p>
-                  Toque em "Aa" na barra de endereço → "Desativar Tradução".
-                </p>
-              </div>
-              <button
-                onClick={this.handleReload}
-                className="bg-white text-black font-semibold rounded-xl px-6 py-3 text-sm"
-              >
-                Já desativei, recarregar
-              </button>
-            </div>
-          </div>
-        );
+        return <TranslateWarningScreen onReload={this.handleReload} />;
       }
       return (
         <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
@@ -3913,8 +3886,89 @@ function useDisableAutoTranslate() {
   }, []);
 }
 
+// Rede de segurança extra: alguns erros provocados pelo tradutor automático
+// (removeChild/insertBefore em nós que o tradutor já alterou) acontecem
+// "fora de turno" — não durante a renderização do React — e por isso NÃO
+// são capturados pelo AppErrorBoundary (Error Boundaries só pegam erros
+// lançados durante o ciclo de render/lifecycle do React). Sem isso, esses
+// erros aparecem como "Uncaught" no console e a tela fica branca, sem
+// nenhuma tela de aviso sendo exibida. Este hook captura esse tipo de erro
+// em qualquer lugar da página, mostra um aviso (via setShowTranslateWarning)
+// e só então recarrega — em vez de recarregar silenciosamente.
+function useGlobalTranslateErrorGuard(setShowTranslateWarning) {
+  useEffect(() => {
+    const handler = (event) => {
+      const msg = String(event?.message || event?.error?.message || "");
+      if (isLikelyTranslateError(msg)) {
+        console.warn(
+          "Erro de tradução automática detectado fora do React — recarregando a página.",
+          msg
+        );
+        try {
+          event.preventDefault();
+        } catch (e) {}
+        setShowTranslateWarning(true);
+        // Dá tempo do usuário ler o aviso antes de recarregar. Pequeno
+        // atraso adicional evita loop de reload caso o tradutor reaplique
+        // a tradução imediatamente após o reload.
+        setTimeout(() => {
+          try {
+            window.location.reload();
+          } catch (e) {}
+        }, 2200);
+      }
+    };
+    window.addEventListener("error", handler);
+    return () => window.removeEventListener("error", handler);
+  }, [setShowTranslateWarning]);
+}
+
+// Tela de aviso reutilizada pelo AppErrorBoundary e pelo guard global —
+// mesmo texto/instruções nos dois casos, para o usuário sempre ver a mesma
+// orientação independente de onde o erro foi capturado.
+function TranslateWarningScreen({ onReload }) {
+  return (
+    <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+      <div className="max-w-sm space-y-4">
+        <p className="text-white font-bold text-lg">
+          Desative a tradução automática
+        </p>
+        <p className="text-zinc-400 text-sm">
+          Detectamos que a tradução automática do navegador (Google Tradutor)
+          está ativa nesta página, e ela conflita com o funcionamento do app.
+          Desative a tradução e recarregue:
+        </p>
+        <div className="text-left text-zinc-400 text-sm space-y-2 bg-zinc-900 rounded-xl p-4">
+          <p className="text-white font-semibold">No Chrome (Android):</p>
+          <p>Toque nos 3 pontinhos (⋮) → desmarque "Traduzir página".</p>
+          <p className="text-white font-semibold pt-2">No Safari (iPhone):</p>
+          <p>Toque em "Aa" na barra de endereço → "Desativar Tradução".</p>
+        </div>
+        {onReload && (
+          <button
+            onClick={onReload}
+            className="bg-white text-black font-semibold rounded-xl px-6 py-3 text-sm"
+          >
+            Já desativei, recarregar
+          </button>
+        )}
+        {!onReload && (
+          <p className="text-zinc-500 text-xs">Recarregando automaticamente…</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function CadastroApp(props) {
+  const [showTranslateWarning, setShowTranslateWarning] = useState(false);
   useDisableAutoTranslate();
+  useGlobalTranslateErrorGuard(setShowTranslateWarning);
+
+  if (showTranslateWarning) {
+    return <TranslateWarningScreen onReload={null} />;
+  }
+
   return (
     <AppErrorBoundary>
       <CadastroAppInner {...props} />
