@@ -49,9 +49,11 @@ import {
   setDoc,
   getDoc,
   collection,
+  collectionGroup,
   addDoc,
   query,
   where,
+  limit,
   getDocs,
   updateDoc,
   runTransaction,
@@ -789,57 +791,73 @@ function CadastroAppInner({ onBack = () => {} }) {
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: null }));
   };
 
-  // Verifica se o CPF existe na coleção de alunos cadastrados pelo admin
-  // Retorna os dados do aluno se encontrado, null caso contrário
-  const checkCpfInStudents = async (
-    cpf: string
-  ): Promise<{ nome: string; ano: string; turma: string } | null> => {
-    const cpfDigits = cpf.replace(/\D/g, "");
-    try {
-      const turmasSnap = await getDocs(collection(db, "alunos"));
-      for (const turmaDoc of turmasSnap.docs) {
-        const turmaId = turmaDoc.id; // ex: "1A", "2B"
-        const alunosSnap = await getDocs(
-          collection(db, "alunos", turmaId, "lista")
-        );
-        for (const alunoDoc of alunosSnap.docs) {
-          const data = alunoDoc.data();
-          const alunoCpf = (data.cpf || "").replace(/\D/g, "");
-          if (alunoCpf === cpfDigits) {
-            return {
-              nome: data.nome || data.nomeAluno || "",
-              ano: data.ano || turmaId.slice(0, 1),
-              turma: data.turma || turmaId.slice(1),
-            };
-          }
-        }
-      }
-    } catch {}
-    return null;
-  };
+// Executa uma promise com tempo limite. Se a promise não resolver dentro do
+// prazo (ex.: conexão lenta/instável, rede bloqueando o Firestore), rejeita
+// em vez de ficar pendente para sempre — isso é o que evita a tela de
+// "carregando" infinita ao verificar o CPF.
+const withTimeout = (promise, ms = 20000) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ]);
 
-  // Verifica se o CPF existe na coleção de responsáveis cadastrados pelo admin
-  const checkCpfInResponsaveis = async (
-    cpf: string
-  ): Promise<{ nome: string; relacao: string; alunoNome?: string; alunoTurma?: string } | null> => {
-    const cpfDigits = cpf.replace(/\D/g, "");
-    try {
-      const snap = await getDocs(collection(db, "responsaveis"));
-      for (const d of snap.docs) {
-        const data = d.data();
-        const respCpf = (data.cpf || "").replace(/\D/g, "");
-        if (respCpf === cpfDigits) {
-          return {
-            nome: data.nome || "",
-            relacao: data.relacao || "responsavel",
-            alunoNome: data.alunoNome || undefined,
-            alunoTurma: data.alunoTurma || undefined,
-          };
-        }
-      }
-    } catch {}
-    return null;
-  };
+const checkCpfInStudents = async (
+  cpf: string
+): Promise<{ nome: string; ano: string; turma: string } | null> => {
+  const cpfDigits = cpf.replace(/\D/g, "");
+  try {
+    // Busca direta via collectionGroup: consulta TODAS as subcoleções
+    // "lista" (de qualquer turma) em uma única query no servidor,
+    // em vez de buscar turma por turma e aluno por aluno no cliente.
+    const q = query(
+      collectionGroup(db, "lista"),
+      where("cpf", "==", cpfDigits),
+      limit(1)
+    );
+    const snap = await withTimeout(getDocs(q));
+    if (snap.empty) return null;
+    const docRef = snap.docs[0];
+    const data = docRef.data();
+    // turmaId é o id do documento pai (ex: "1A", "2B")
+    const turmaId = docRef.ref.parent.parent?.id || "";
+    return {
+      nome: data.nome || data.nomeAluno || "",
+      ano: data.ano || turmaId.slice(0, 1),
+      turma: data.turma || turmaId.slice(1),
+    };
+  } catch (err) {
+    console.warn("Falha ao verificar CPF em alunos:", err);
+  }
+  return null;
+};
+
+// Verifica se o CPF existe na coleção de responsáveis cadastrados pelo admin
+const checkCpfInResponsaveis = async (
+  cpf: string
+): Promise<{ nome: string; relacao: string; alunoNome?: string; alunoTurma?: string } | null> => {
+  const cpfDigits = cpf.replace(/\D/g, "");
+  try {
+    const q = query(
+      collection(db, "responsaveis"),
+      where("cpf", "==", cpfDigits),
+      limit(1)
+    );
+    const snap = await withTimeout(getDocs(q));
+    if (snap.empty) return null;
+    const data = snap.docs[0].data();
+    return {
+      nome: data.nome || "",
+      relacao: data.relacao || "responsavel",
+      alunoNome: data.alunoNome || undefined,
+      alunoTurma: data.alunoTurma || undefined,
+    };
+  } catch (err) {
+    console.warn("Falha ao verificar CPF em responsáveis:", err);
+  }
+  return null;
+};
 
   // Busca automática ao digitar o CPF completo no formulário de cadastro
   const handleCpfLookup = async (cpf: string) => {
@@ -852,18 +870,20 @@ function CadastroAppInner({ onBack = () => {} }) {
       return;
     }
     setCpfLookupStatus("loading");
-    const found = await checkCpfInStudents(cpf);
-    if (found) {
-      setCpfStudentData(found);
-      setCpfLookupStatus("found");
-      setCpfPaiData(null);
-      setFormData((prev) => ({
-        ...prev,
-        ano: found.ano,
-        turma: found.turma,
-        nomeAluno: found.nome,
-      }));
-    } else {
+    try {
+      const found = await checkCpfInStudents(cpf);
+      if (found) {
+        setCpfStudentData(found);
+        setCpfLookupStatus("found");
+        setCpfPaiData(null);
+        setFormData((prev) => ({
+          ...prev,
+          ano: found.ano,
+          turma: found.turma,
+          nomeAluno: found.nome,
+        }));
+        return;
+      }
       // Não encontrou como aluno — verifica se é responsável cadastrado pelo admin
       const foundPai = await checkCpfInResponsaveis(cpf);
       if (foundPai) {
@@ -877,13 +897,22 @@ function CadastroAppInner({ onBack = () => {} }) {
           nomeAluno: "",
           nomeResponsavel: foundPai.nome,
         }));
-      } else {
-        setCpfStudentData(null);
-        setCpfPaiData(null);
-        setCpfLookupStatus("not_found");
-        setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
-        setCpfNotFound(true);
+        return;
       }
+      setCpfStudentData(null);
+      setCpfPaiData(null);
+      setCpfLookupStatus("not_found");
+      setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
+      setCpfNotFound(true);
+    } catch (err) {
+      // Rede falhou/travou nas duas buscas. Em vez de ficar parado em
+      // "loading" para sempre, volta para "idle" e avisa o usuário, que
+      // pode então digitar de novo ou tentar com outra conexão.
+      console.warn("Erro ao verificar CPF:", err);
+      setCpfStudentData(null);
+      setCpfPaiData(null);
+      setCpfLookupStatus("idle");
+      showToast("Verifique sua rede");
     }
   };
 
