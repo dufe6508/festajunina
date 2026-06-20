@@ -63,7 +63,7 @@ import {
 // Mercado Pago Public Key (modo transparente)
 // ⚠️ MODO DE TESTE — Public Key de teste do Mercado Pago.
 // Troque para "APP_USR-c2f301db-a6e5-49aa-9030-ddda699ca4ed" em produção.
-const MP_PUBLIC_KEY = "APP_USR-acf7dac7-662d-4531-b60b-29ee7bdefb08";
+const MP_PUBLIC_KEY = "APP_USR-e7fa9cad-4a58-479e-976b-09e79786fa99";
 
 // Carrega o SDK do MP dinamicamente
 const loadMpSdk = () =>
