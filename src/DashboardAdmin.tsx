@@ -58,6 +58,7 @@ import {
   getFirestore,
   collection,
   getDocs,
+  getDoc,
   doc,
   setDoc,
   addDoc,
@@ -607,14 +608,17 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   useEffect(() => {
     const inicializarFirebase = async () => {
       try {
-        // Garante que o contador existe
+        // Garante que o contador existe — lê o DOCUMENTO diretamente (getDoc),
+        // em vez de listar toda a coleção "config" e procurar o id nela.
+        // A forma antiga podia, em situações de falha momentânea de rede/regra
+        // de segurança na listagem, concluir erroneamente que o contador não
+        // existia e SOBRESCREVER o documento com { ultimo: 0 }, zerando o
+        // contador mesmo que ele já estivesse em um número alto (ex: 220) —
+        // e os próximos ingressos criados reaproveitavam códigos já usados
+        // (FJ-0001, FJ-0002...), sobrescrevendo ingressos antigos no DB.
         const counterRef = doc(db, "config", "ticketCounter");
-        const counterSnap = await getDocs(collection(db, "config"));
-        let counterExiste = false;
-        counterSnap.forEach((d) => {
-          if (d.id === "ticketCounter") counterExiste = true;
-        });
-        if (!counterExiste) {
+        const counterDoc = await getDoc(counterRef);
+        if (!counterDoc.exists()) {
           await setDoc(counterRef, { ultimo: 0 });
         }
         // Garante que a coleção "ingressos" existe (Firestore não cria coleções vazias,
@@ -663,15 +667,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   }, [dashboardDetailModal]);
 
   useEffect(() => {
-    // Sempre busca os ingressos para que a contagem dos lotes seja precisa
+    // Sempre busca os ingressos para que a contagem dos lotes seja precisa.
+    // Os LOTES também são sempre buscados (não só em telas específicas):
+    // os modais de associar ingresso (aluno/responsável), criação em lote e
+    // adicionar ingresso dependem de "batches" estar carregado para conseguir
+    // encontrar o lote selecionado e salvar o "loteId" corretamente no
+    // ingresso. Antes, "batches" só era buscado ao visitar as abas de
+    // Lotes/Adicionar Ingresso — se o admin associasse um ingresso a partir
+    // de outra aba (ex: Alunos) antes disso, "batches" podia estar vazio
+    // nesse instante e o ingresso era salvo sem loteId (caindo em "Acesso
+    // Geral" e não contando em nenhum lote).
     fetchAllTicketsForAdmin();
-    if (
-      activeTab === "admin_batches" ||
-      activeTab === "admin_add_ticket" ||
-      activeTab === "admin_notifications"
-    ) {
-      fetchBatches();
-    }
+    fetchBatches();
   }, [activeTab]);
 
   // ─── NOTIFICAÇÕES: busca eventos de login (coleção "logins") ───
@@ -3639,6 +3646,13 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
                             {getLoteName(t)}
                           </span>
+                          {(t.ano || t.turma) && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800">
+                              {t.ano ? `${t.ano}º Ano` : ""}
+                              {t.ano && t.turma ? " · " : ""}
+                              {t.turma ? `Turma ${t.turma}` : ""}
+                            </span>
+                          )}
                           <span className="text-zinc-600 text-xs">
                             {formatDate(t.criadoEm)}
                           </span>
@@ -5136,6 +5150,32 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                   })}
                 </div>
               )}
+
+              {/* Aviso de ingressos sem lote correspondente (não contabilizados em nenhum card acima) */}
+              {!loadingBatches && (() => {
+                const orfaos = (allTickets || []).filter(
+                  (t) => !batches.some((b) => b.id === t.loteId || b.nome === t.type)
+                );
+                if (orfaos.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-3 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl px-5 py-4">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-amber-300 text-sm font-semibold">
+                        {orfaos.length} ingresso{orfaos.length !== 1 ? "s" : ""} sem lote
+                        correspondente
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Esses ingressos foram criados com um "loteId" que não existe
+                        mais nesta lista (ex: lote excluído, ou ingresso vindo de outro
+                        fluxo de compra que não preencheu o lote). Por isso eles não
+                        somam em nenhum card acima e a soma dos lotes não bate com o
+                        total de "Vendidos" da Visão Geral.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
           {/* ── ALUNOS (sub-abas) ── */}
