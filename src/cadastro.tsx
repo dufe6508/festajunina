@@ -512,6 +512,17 @@ function CadastroAppInner({ onBack = () => {} }) {
 
   const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
 
+  // authReadyRef: fica true assim que o Firebase Auth termina a 1ª
+  // verificação de sessão (onAuthStateChanged dispara ao menos uma vez).
+  // Usado para dar uma pequena espera antes da 1ª busca de CPF, evitando
+  // que ela saia sem o token de auth ainda propagado.
+  const authReadyRef = useRef(false);
+  // cpfSeqRef: identifica a busca de CPF mais recente. Se o usuário
+  // digitar/corrigir rápido e duas buscas saírem em paralelo, a resposta
+  // de uma busca antiga (que pode chegar depois, fora de ordem) é
+  // ignorada — só a busca mais recente pode atualizar a tela.
+  const cpfSeqRef = useRef(0);
+
   // Estados dos Lotes Visíveis
   const [batches, setBatches] = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
@@ -588,6 +599,11 @@ function CadastroAppInner({ onBack = () => {} }) {
       // Se tivermos forçado um login de admin, ignoramos o listener do Firebase
       if (adminBypassRef.current) return;
 
+      // A partir daqui o Firebase já sabe se há (ou não) um usuário
+      // logado e o token (se houver) já está disponível para as
+      // próximas leituras do Firestore — inclusive a busca de CPF.
+      authReadyRef.current = true;
+
       if (user) {
         try {
           const docRef = doc(db, "usuarios", user.uid);
@@ -658,6 +674,7 @@ function CadastroAppInner({ onBack = () => {} }) {
       (error) => {
         // Erro do próprio listener (ex.: config inválida do Firebase).
         // Sem isso, a tela ficaria presa em "loading" para sempre.
+        authReadyRef.current = true;
         console.error("Erro no onAuthStateChanged:", error);
         setView("auth_choice");
       }
@@ -818,9 +835,17 @@ const checkCpfInStudents = async (
       turma: data.turma || turmaId.slice(1),
     };
   } catch (err) {
+    // IMPORTANTE: antes este erro era só logado e a função retornava
+    // null — ou seja, um erro de rede/permissão (ex.: token de auth
+    // ainda não propagado bem no início da página) era tratado
+    // exatamente igual a "CPF não existe". Isso causava o falso
+    // "CPF não encontrado" na 1ª tentativa, que "sumia" ao tentar de
+    // novo (quando o erro já não ocorria mais). Agora relançamos o
+    // erro para quem chamou (handleCpfLookup) poder diferenciar e
+    // tentar de novo em vez de já cravar "não encontrado".
     console.warn("Falha ao verificar CPF em alunos:", err);
+    throw err;
   }
-  return null;
 };
 
 // Verifica se o CPF existe na coleção de responsáveis cadastrados pelo admin
@@ -844,10 +869,22 @@ const checkCpfInResponsaveis = async (
       alunoTurma: data.alunoTurma || undefined,
     };
   } catch (err) {
+    // Mesmo motivo do comentário em checkCpfInStudents: relançamos o
+    // erro em vez de mascarar como "não encontrado".
     console.warn("Falha ao verificar CPF em responsáveis:", err);
+    throw err;
   }
-  return null;
 };
+
+  // Espera o Firebase Auth terminar a verificação inicial de sessão
+  // (no máximo timeoutMs) antes de liberar a 1ª busca de CPF. É a "leve
+  // espera" que evita a busca saltar na frente do auth.
+  const waitForAuthReady = async (timeoutMs = 4000) => {
+    const start = Date.now();
+    while (!authReadyRef.current && Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
 
   // Busca automática ao digitar o CPF completo no formulário de cadastro
   const handleCpfLookup = async (cpf: string) => {
@@ -859,51 +896,77 @@ const checkCpfInResponsaveis = async (
       setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
       return;
     }
+
+    // Identifica esta busca específica. Se outra busca mais nova for
+    // disparada antes desta terminar, esta é descartada ao final.
+    const mySeq = ++cpfSeqRef.current;
     setCpfLookupStatus("loading");
-    try {
-      const found = await checkCpfInStudents(cpf);
-      if (found) {
-        setCpfStudentData(found);
-        setCpfLookupStatus("found");
-        setCpfPaiData(null);
-        setFormData((prev) => ({
-          ...prev,
-          ano: found.ano,
-          turma: found.turma,
-          nomeAluno: found.nome,
-        }));
-        return;
-      }
-      // Não encontrou como aluno — verifica se é responsável cadastrado pelo admin
-      const foundPai = await checkCpfInResponsaveis(cpf);
-      if (foundPai) {
-        setCpfPaiData(foundPai);
-        setCpfLookupStatus("pai_found");
+
+    // Pequena espera: garante que o Firebase Auth já está pronto antes
+    // de consultar o Firestore. Sem isso, a 1ª busca da sessão pode
+    // sair sem o token de autenticação ainda propagado, ser negada
+    // pelas regras de segurança e ser confundida com "CPF não existe".
+    await waitForAuthReady();
+    if (mySeq !== cpfSeqRef.current) return; // já existe busca mais nova
+
+    const tentarBusca = async (tentativa = 0) => {
+      try {
+        const found = await checkCpfInStudents(cpf);
+        if (mySeq !== cpfSeqRef.current) return; // resposta desatualizada
+        if (found) {
+          setCpfStudentData(found);
+          setCpfLookupStatus("found");
+          setCpfPaiData(null);
+          setFormData((prev) => ({
+            ...prev,
+            ano: found.ano,
+            turma: found.turma,
+            nomeAluno: found.nome,
+          }));
+          return;
+        }
+        // Não encontrou como aluno — verifica se é responsável cadastrado pelo admin
+        const foundPai = await checkCpfInResponsaveis(cpf);
+        if (mySeq !== cpfSeqRef.current) return; // resposta desatualizada
+        if (foundPai) {
+          setCpfPaiData(foundPai);
+          setCpfLookupStatus("pai_found");
+          setCpfStudentData(null);
+          setFormData((prev) => ({
+            ...prev,
+            ano: "",
+            turma: "",
+            nomeAluno: "",
+            nomeResponsavel: foundPai.nome,
+          }));
+          return;
+        }
         setCpfStudentData(null);
-        setFormData((prev) => ({
-          ...prev,
-          ano: "",
-          turma: "",
-          nomeAluno: "",
-          nomeResponsavel: foundPai.nome,
-        }));
-        return;
+        setCpfPaiData(null);
+        setCpfLookupStatus("not_found");
+        setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
+        setCpfNotFound(true);
+      } catch (err) {
+        // Erro de rede/permissão (não é "CPF realmente não existe").
+        // Antes, qualquer erro aqui já virava "não encontrado" na
+        // hora. Agora damos 1 nova chance, com uma pequena espera,
+        // antes de desistir — cobre instabilidade momentânea de rede
+        // ou o token de auth ainda terminando de propagar.
+        if (tentativa < 1) {
+          await new Promise((r) => setTimeout(r, 900));
+          if (mySeq !== cpfSeqRef.current) return; // já existe busca mais nova
+          return tentarBusca(tentativa + 1);
+        }
+        console.warn("Erro ao verificar CPF:", err);
+        if (mySeq !== cpfSeqRef.current) return;
+        setCpfStudentData(null);
+        setCpfPaiData(null);
+        setCpfLookupStatus("idle");
+        showToast("Verifique sua rede e tente novamente.");
       }
-      setCpfStudentData(null);
-      setCpfPaiData(null);
-      setCpfLookupStatus("not_found");
-      setFormData((prev) => ({ ...prev, ano: "", turma: "", nomeAluno: "" }));
-      setCpfNotFound(true);
-    } catch (err) {
-      // Rede falhou/travou nas duas buscas. Em vez de ficar parado em
-      // "loading" para sempre, volta para "idle" e avisa o usuário, que
-      // pode então digitar de novo ou tentar com outra conexão.
-      console.warn("Erro ao verificar CPF:", err);
-      setCpfStudentData(null);
-      setCpfPaiData(null);
-      setCpfLookupStatus("idle");
-      showToast("Verifique sua rede");
-    }
+    };
+
+    await tentarBusca();
   };
 
   // 2. Login Real via E-mail/Senha
