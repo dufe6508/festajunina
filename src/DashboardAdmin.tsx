@@ -7178,6 +7178,13 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                                         ""
                                       ) === cpfDigits
                                   );
+                                // Verifica se o aluno já criou uma conta (fez login)
+                                const hasLogin =
+                                  !cpfMissing &&
+                                  Object.values(usersMap).some(
+                                    (userCpf) =>
+                                      (userCpf || "").replace(/\D/g, "") === cpfDigits
+                                  );
                                 return (
                                   <div
                                     key={aluno.id || i}
@@ -7187,7 +7194,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                                       {i + 1}
                                     </span>
                                     <div className="min-w-0 pr-3">
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-2 flex-wrap">
                                         {cpfMissing && (
                                           <button
                                             type="button"
@@ -7207,6 +7214,12 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                                         <p className="text-white font-medium text-sm truncate">
                                           {aluno.nome}
                                         </p>
+                                        {hasLogin && (
+                                          <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-bold text-blue-400 uppercase tracking-wider">
+                                            <LogIn className="h-2.5 w-2.5" />
+                                            login
+                                          </span>
+                                        )}
                                         {hasTicket && (
                                           <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-[9px] font-bold text-green-400 uppercase tracking-wider">
                                             ingresso
