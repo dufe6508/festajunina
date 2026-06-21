@@ -627,6 +627,22 @@ function CadastroAppInner({ onBack = () => {} }) {
 
           setPurchasedTickets(tickets);
           safeStorage.set(SESSION_KEY, "1");
+
+          // ─── Registra evento de login na coleção "logins" ───
+          try {
+            await addDoc(collection(db, "logins"), {
+              userId: user.uid,
+              nome: userData.nomeResponsavel || user.displayName || "",
+              nomeAluno: userData.nomeAluno || "",
+              email: user.email || "",
+              cpf: userData.cpf || "",
+              criadoEm: new Date().toISOString(),
+            });
+          } catch (loginErr) {
+            console.warn("Não foi possível registrar evento de login:", loginErr);
+          }
+          // ────────────────────────────────────────────────────
+
           setActiveTab("ingressos");
           setView("dashboard");
         } catch (err) {
@@ -1288,6 +1304,21 @@ const checkCpfInResponsaveis = async (
           userData.cpf
         );
         setPurchasedTickets(tickets);
+
+        // ─── Registra evento de login (primeiro acesso após cadastro) ───
+        try {
+          await addDoc(collection(db, "logins"), {
+            userId: currentUser.uid,
+            nome: userData.nomeResponsavel || "",
+            nomeAluno: userData.nomeAluno || "",
+            email: currentUser.email || "",
+            cpf: userData.cpf || "",
+            criadoEm: new Date().toISOString(),
+          });
+        } catch (loginErr) {
+          console.warn("Não foi possível registrar evento de login:", loginErr);
+        }
+        // ────────────────────────────────────────────────────────────────
 
         safeStorage.set(SESSION_KEY, "1");
         setIsSuccess(false);
