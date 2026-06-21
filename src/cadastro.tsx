@@ -471,7 +471,13 @@ const formatDate = (iso) => {
 
 /* ─── App Principal ─── */
 function CadastroAppInner({ onBack = () => {} }) {
-  const [view, setView] = useState("loading");
+  const [view, setView] = useState(() => {
+    // Se havia sessão de admin salva, começa direto no dashboard
+    try {
+      if (localStorage.getItem("fj_admin_session")) return "dashboard";
+    } catch {}
+    return "loading";
+  });
   const [activeTab, setActiveTab] = useState("inicio");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -508,9 +514,18 @@ function CadastroAppInner({ onBack = () => {} }) {
     alunoNome?: string;
     alunoTurma?: string;
   } | null>(null); // Dados do responsável encontrado pelo CPF
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    // Restaura sessão de admin/teste após F5 (não usa Firebase Auth)
+    try {
+      const saved = localStorage.getItem("fj_admin_session");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
 
-  const adminBypassRef = useRef(false); // Ref para gerenciar o Bypass Admin
+  const adminBypassRef = useRef(!!(() => {
+    try { return localStorage.getItem("fj_admin_session"); } catch { return null; }
+  })()); // Ref para gerenciar o Bypass Admin
 
   // authReadyRef: fica true assim que o Firebase Auth termina a 1ª
   // verificação de sessão (onAuthStateChanged dispara ao menos uma vez).
@@ -643,22 +658,6 @@ function CadastroAppInner({ onBack = () => {} }) {
 
           setPurchasedTickets(tickets);
           safeStorage.set(SESSION_KEY, "1");
-
-          // ─── Registra evento de login na coleção "logins" ───
-          try {
-            await addDoc(collection(db, "logins"), {
-              userId: user.uid,
-              nome: userData.nomeResponsavel || user.displayName || "",
-              nomeAluno: userData.nomeAluno || "",
-              email: user.email || "",
-              cpf: userData.cpf || "",
-              criadoEm: new Date().toISOString(),
-            });
-          } catch (loginErr) {
-            console.warn("Não foi possível registrar evento de login:", loginErr);
-          }
-          // ────────────────────────────────────────────────────
-
           setActiveTab("ingressos");
           setView("dashboard");
         } catch (err) {
@@ -985,7 +984,7 @@ const checkCpfInResponsaveis = async (
 
       // Simulamos um pequeno delay de rede para parecer natural
       setTimeout(() => {
-        setCurrentUser({
+        const adminUser = {
           uid: "admin_master_123",
           isAdmin: true,
           nomeResponsavel: "Administração Brandão",
@@ -994,7 +993,9 @@ const checkCpfInResponsaveis = async (
           // Define o que o card/lista "Pendentes" mostra no painel:
           // "presenca" => quem NÃO entrou (não marcou presença no evento)
           modoPendentes: "presenca",
-        });
+        };
+        setCurrentUser(adminUser);
+        try { localStorage.setItem("fj_admin_session", JSON.stringify(adminUser)); } catch {}
         safeStorage.set(SESSION_KEY, "1");
         setIsLoading(false);
         setView("dashboard");
@@ -1012,7 +1013,7 @@ const checkCpfInResponsaveis = async (
       adminBypassRef.current = true;
 
       setTimeout(() => {
-        setCurrentUser({
+        const adminUser = {
           uid: "admin_master_124",
           isAdmin: true,
           nomeResponsavel: "Administração Brandão",
@@ -1020,7 +1021,9 @@ const checkCpfInResponsaveis = async (
           email: "admin2@brandao.com",
           // "pagamento" => quem NÃO pagou o ingresso (comportamento original)
           modoPendentes: "pagamento",
-        });
+        };
+        setCurrentUser(adminUser);
+        try { localStorage.setItem("fj_admin_session", JSON.stringify(adminUser)); } catch {}
         safeStorage.set(SESSION_KEY, "1");
         setIsLoading(false);
         setView("dashboard");
@@ -1368,21 +1371,6 @@ const checkCpfInResponsaveis = async (
         );
         setPurchasedTickets(tickets);
 
-        // ─── Registra evento de login (primeiro acesso após cadastro) ───
-        try {
-          await addDoc(collection(db, "logins"), {
-            userId: currentUser.uid,
-            nome: userData.nomeResponsavel || "",
-            nomeAluno: userData.nomeAluno || "",
-            email: currentUser.email || "",
-            cpf: userData.cpf || "",
-            criadoEm: new Date().toISOString(),
-          });
-        } catch (loginErr) {
-          console.warn("Não foi possível registrar evento de login:", loginErr);
-        }
-        // ────────────────────────────────────────────────────────────────
-
         safeStorage.set(SESSION_KEY, "1");
         setIsSuccess(false);
         setView("dashboard");
@@ -1404,6 +1392,7 @@ const checkCpfInResponsaveis = async (
     // Se for admin ou conta de teste, apenas limpamos o bypass e a sessão mockada
     if (currentUser?.isAdmin || currentUser?.isTest) {
       adminBypassRef.current = false;
+      try { localStorage.removeItem("fj_admin_session"); } catch {}
     } else {
       await signOut(auth);
     }
