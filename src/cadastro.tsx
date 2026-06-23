@@ -2934,10 +2934,6 @@ const checkCpfInResponsaveis = async (
 
                               <p className="text-sm text-zinc-400">
                                 Acesso garantido ao evento.
-                                {batch.dataLimite &&
-                                  ` Disponível até ${formatDate(
-                                    batch.dataLimite
-                                  )}`}
                               </p>
                               <p className="text-white font-black text-2xl mt-4">
                                 R${" "}
