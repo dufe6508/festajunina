@@ -681,6 +681,22 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
     fetchBatches();
   }, [activeTab]);
 
+  // Auto-seleciona o lote do responsável com base na turma do aluno associado
+  useEffect(() => {
+    if (!responsavelModal || batches.length === 0) return;
+    if (associarResponsavelForm.loteId) return; // já selecionado
+    const turmaKey = `${responsavelModal.alunoAno ?? ""}${responsavelModal.alunoTurma ?? ""}`.trim().toUpperCase();
+    if (!turmaKey) return;
+    const matched = batches.filter((b) => {
+      const pubOk = !b.publico || b.publico === "Pais/Responsáveis" || b.publico === "Ambos";
+      const turmaOk = !b.turmasVisiveis || b.turmasVisiveis.length === 0 || b.turmasVisiveis.includes(turmaKey);
+      return pubOk && turmaOk;
+    });
+    if (matched.length === 1) {
+      setAssociarResponsavelForm((p) => ({ ...p, loteId: matched[0].id }));
+    }
+  }, [responsavelModal, batches]);
+
   // ─── NOTIFICAÇÕES: busca eventos de login (coleção "logins") ───
   const fetchLoginNotifs = async () => {
     try {
@@ -8798,30 +8814,58 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                           <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
                             Lote
                           </label>
-                          <select
-                            value={associarResponsavelForm.loteId}
-                            onChange={(e) =>
-                              setAssociarResponsavelForm((p) => ({
-                                ...p,
-                                loteId: e.target.value,
-                              }))
-                            }
-                            className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
-                          >
-                            <option value="" disabled>
-                              Selecione o lote
-                            </option>
-                            {batches.map((b) => (
-                              <option
-                                key={b.id}
-                                value={b.id}
-                                className="bg-zinc-900"
-                              >
-                                {b.nome} — R${" "}
-                                {Number(b.preco).toFixed(2).replace(".", ",")}
-                              </option>
-                            ))}
-                          </select>
+                          {(() => {
+                            const turmaKey = `${responsavelModal.alunoAno ?? ""}${responsavelModal.alunoTurma ?? ""}`.trim().toUpperCase();
+                            const filteredBatches = batches.filter((b) => {
+                              if (turmaKey) {
+                                const pubOk = !b.publico || b.publico === "Pais/Responsáveis" || b.publico === "Ambos";
+                                const turmaOk = !b.turmasVisiveis || b.turmasVisiveis.length === 0 || b.turmasVisiveis.includes(turmaKey);
+                                return pubOk && turmaOk;
+                              }
+                              return true;
+                            });
+                            return (
+                              <>
+                                {turmaKey && (
+                                  <p className="text-[11px] text-blue-400 mb-1">
+                                    Turma do aluno: <span className="font-bold">{turmaKey}</span>
+                                    {filteredBatches.length === 1 && (
+                                      <> — lote sugerido: <span className="font-bold">R$ {Number(filteredBatches[0].preco).toFixed(2).replace(".", ",")}</span></>
+                                    )}
+                                  </p>
+                                )}
+                                <select
+                                  value={associarResponsavelForm.loteId}
+                                  onChange={(e) =>
+                                    setAssociarResponsavelForm((p) => ({
+                                      ...p,
+                                      loteId: e.target.value,
+                                    }))
+                                  }
+                                  className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
+                                >
+                                  <option value="" disabled>
+                                    Selecione o lote
+                                  </option>
+                                  {filteredBatches.map((b) => (
+                                    <option
+                                      key={b.id}
+                                      value={b.id}
+                                      className="bg-zinc-900"
+                                    >
+                                      {b.nome} — R${" "}
+                                      {Number(b.preco).toFixed(2).replace(".", ",")}
+                                    </option>
+                                  ))}
+                                  {turmaKey && filteredBatches.length === 0 && (
+                                    <option value="" disabled>
+                                      Nenhum lote para turma {turmaKey}
+                                    </option>
+                                  )}
+                                </select>
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* E-mail */}
