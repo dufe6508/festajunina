@@ -785,10 +785,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         const allT: any[] = [];
         ticketsSnap.forEach((d) => allT.push({ id: d.id, ...d.data() }));
 
+        // Helper: verifica se um ingresso pertence a um lote
+        const ticketPertenceAoLote = (t: any, b: any): boolean => {
+          if (b.id === t.loteId || b.nome === t.type) return true;
+          if (b.turmasVisiveis && b.turmasVisiveis.length > 0) {
+            const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
+            return key.length > 1 && b.turmasVisiveis.includes(key);
+          }
+          return false;
+        };
+
         const synced = sorted.map((b) => {
-          const count = allT.filter(
-            (t) => t.loteId === b.id || t.type === b.nome
-          ).length;
+          const count = allT.filter((t) => ticketPertenceAoLote(t, b)).length;
           // Corrige sempre que o contador divergir da contagem real (inclusão OU exclusão)
           if (b.ingressosAssociados == null || b.ingressosAssociados !== count) {
             updateDoc(doc(db, "lotes", b.id), { ingressosAssociados: count }).catch(() => {});
@@ -4936,12 +4944,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
+                    const pertenceAoLote = (t: any) => {
+                      if (t.loteId === batch.id || t.type === batch.nome) return true;
+                      if (batch.turmasVisiveis && batch.turmasVisiveis.length > 0) {
+                        const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
+                        return key.length > 1 && batch.turmasVisiveis.includes(key);
+                      }
+                      return false;
+                    };
                     const vendidos = (allTickets || []).filter(
-                      (t) => t.pagamentoConfirmado && (t.loteId === batch.id || t.type === batch.nome)
+                      (t) => t.pagamentoConfirmado && pertenceAoLote(t)
                     ).length;
-                    const totalNaDB = (allTickets || []).filter(
-                      (t) => t.loteId === batch.id || t.type === batch.nome
-                    ).length;
+                    const totalNaDB = (allTickets || []).filter(pertenceAoLote).length;
                     // Sempre exibe a contagem real lida da DB (coleção "ingressos"),
                     // em vez do contador persistido no lote, que pode ficar
                     // desatualizado/incorreto após edições, exclusões ou associações.
@@ -5153,8 +5167,15 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
 
               {/* Aviso de ingressos sem lote correspondente (não contabilizados em nenhum card acima) */}
               {!loadingBatches && (() => {
-                const orfaos = (allTickets || []).filter(
-                  (t) => !batches.some((b) => b.id === t.loteId || b.nome === t.type)
+                const orfaos = (allTickets || []).filter((t) =>
+                  !batches.some((b) => {
+                    if (b.id === t.loteId || b.nome === t.type) return true;
+                    if (b.turmasVisiveis && b.turmasVisiveis.length > 0) {
+                      const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
+                      return key.length > 1 && b.turmasVisiveis.includes(key);
+                    }
+                    return false;
+                  })
                 );
                 if (orfaos.length === 0) return null;
                 return (
@@ -8632,15 +8653,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                         <div
                           className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${
                             responsavelModalTicket.usado
-                              ? "bg-green-500/5"
+                              ? "bg-blue-500/10"
                               : "bg-zinc-900/30"
                           }`}
                         >
                           {responsavelModalTicket.usado ? (
                             <>
-                              <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />
-                              <span className="text-green-400 text-xs font-bold">
+                              <CheckCircle className="h-4 w-4 text-blue-400 shrink-0" />
+                              <span className="text-blue-400 text-xs font-bold">
                                 Validado — entrada confirmada
+                              </span>
+                              <span className="ml-auto px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[9px] font-bold tracking-widest">
+                                PAI / RESPONSÁVEL
                               </span>
                             </>
                           ) : (
@@ -8648,6 +8672,9 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                               <Clock className="h-4 w-4 text-zinc-400 shrink-0" />
                               <span className="text-zinc-400 text-xs font-bold">
                                 Pendente de validação
+                              </span>
+                              <span className="ml-auto px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold tracking-widest">
+                                PAI / RESPONSÁVEL
                               </span>
                             </>
                           )}
