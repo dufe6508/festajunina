@@ -3084,7 +3084,27 @@ const checkCpfInResponsaveis = async (
                           className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl overflow-hidden"
                         >
                           {/* Stripe topo */}
-                          <div className="h-1 bg-white w-full" />
+                          <div className={`h-1 w-full ${t.usado ? "bg-green-500" : "bg-white"}`} />
+
+                          {/* Banner de validado */}
+                          {t.usado && (
+                            <div className="flex items-center gap-2 px-5 py-2.5 bg-green-500/10 border-b border-green-500/20">
+                              <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
+                              <span className="text-green-400 text-xs font-bold">
+                                Ingresso utilizado
+                              </span>
+                              {t.horaEntrada && (
+                                <span className="text-green-400/70 text-xs ml-auto">
+                                  {new Date(t.horaEntrada).toLocaleString("pt-BR", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                          )}
 
                           <div className="p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6">
                             {/* Info do ingresso */}
