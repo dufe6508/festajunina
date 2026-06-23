@@ -2116,10 +2116,7 @@ const checkCpfInResponsaveis = async (
                             Lote exclusivo para pais
                           </p>
                           <p className="text-zinc-400 text-sm leading-relaxed">
-                            Os ingressos para pais e responsáveis estarão
-                            disponíveis a partir do dia{" "}
-                            <span className="text-white font-bold">21 de junho</span>
-                            , com quantidade limitada. Fique de olho!
+                            Os ingressos para pais e responsáveis estão disponíveis com quantidade limitada, vinculados à turma do aluno.
                           </p>
                         </div>
                       )}
@@ -2453,12 +2450,7 @@ const checkCpfInResponsaveis = async (
                         Lote exclusivo para pais
                       </p>
                       <p className="text-zinc-400 text-sm leading-relaxed">
-                        Os ingressos para pais e responsáveis estarão
-                        disponíveis a partir do dia{" "}
-                        <span className="text-white font-bold">
-                          21 de junho
-                        </span>
-                        , com quantidade limitada. Fique de olho!
+                        Os ingressos para pais e responsáveis estão disponíveis com quantidade limitada, vinculados à turma do aluno.
                       </p>
                     </div>
                   )}
