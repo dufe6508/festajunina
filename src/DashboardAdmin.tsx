@@ -422,11 +422,52 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   >([]);
   const importParentFileRef = useRef<HTMLInputElement>(null);
 
+  // Estados: Importação de Ex-Alunos (apenas nome + cpf)
+  const [importExFiles, setImportExFiles] = useState<File[]>([]);
+  const [importExPreview, setImportExPreview] = useState<any[]>([]);
+  const [importExErrors, setImportExErrors] = useState<string[]>([]);
+  const [importExLoading, setImportExLoading] = useState(false);
+  const [importExResult, setImportExResult] = useState<{
+    success: number;
+    failed: number;
+    duplicates: number;
+  } | null>(null);
+  const [importExDragActive, setImportExDragActive] = useState(false);
+  const [importExTypeErrors, setImportExTypeErrors] = useState<string[]>([]);
+  const importExFileRef = useRef<HTMLInputElement>(null);
+
+  // Estados: Pesquisa de Ex-Alunos
+  const [exAlunoSearch, setExAlunoSearch] = useState("");
+  const [exAlunoResults, setExAlunoResults] = useState<any[]>([]);
+  const [exAlunoLoading, setExAlunoLoading] = useState(false);
+  const [confirmDeleteExAluno, setConfirmDeleteExAluno] = useState<any | null>(
+    null
+  );
+  const [deleteExAlunoLoading, setDeleteExAlunoLoading] = useState(false);
+
+  // Estados: Importação de Lista de Pais (layout mãe+pai por linha, turma por seção)
+  const [importListaFiles, setImportListaFiles] = useState<File[]>([]);
+  const [importListaPreview, setImportListaPreview] = useState<any[]>([]);
+  const [importListaErrors, setImportListaErrors] = useState<string[]>([]);
+  const [importListaLoading, setImportListaLoading] = useState(false);
+  const [importListaResult, setImportListaResult] = useState<{
+    success: number;
+    failed: number;
+    duplicates: number;
+  } | null>(null);
+  const [importListaDragActive, setImportListaDragActive] = useState(false);
+  const [importListaTypeErrors, setImportListaTypeErrors] = useState<string[]>(
+    []
+  );
+  const importListaFileRef = useRef<HTMLInputElement>(null);
+
   // Sub-abas da seção de Alunos
   const [groupsSubTab, setGroupsSubTab] = useState<
     "import" | "manual" | "search" | "classes" | "responsaveis"
   >("import");
-  const [importSubTab, setImportSubTab] = useState<"alunos" | "pais">("alunos");
+  const [importSubTab, setImportSubTab] = useState<
+    "alunos" | "pais" | "paislista" | "exalunos"
+  >("alunos");
   // Turmas: navegação
   const [classesYear, setClassesYear] = useState<string | null>(null); // "1","2","3"
   const [classesClass, setClassesClass] = useState<string | null>(null); // "A".."L"
@@ -915,7 +956,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   };
 
   // Tipos de arquivo permitidos
-  const ALLOWED_EXTENSIONS = [".csv", ".xlsx"];
+  const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
   const isAllowedFile = (file: File): boolean => {
     const name = file.name.toLowerCase();
     return ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
@@ -1284,6 +1325,373 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
       showToast("Erro durante a importação.", "error");
     }
     setImportParentLoading(false);
+  };
+
+  // ─── PARSE/VALIDAÇÃO/IMPORTAÇÃO DE EX-ALUNOS ───
+  // Tabela simples: apenas nome e cpf.
+
+  const normalizeExRow = (row: any) => {
+    const nome =
+      row.nome ||
+      row.nomecompleto ||
+      row.nomealuno ||
+      row.exaluno ||
+      row.aluno ||
+      row.name ||
+      "";
+    const cpf = (row.cpf || row.documento || row.doc || "").replace(/\D/g, "");
+    return { nome: String(nome).trim(), cpf };
+  };
+
+  const validateExRow = (
+    r: { nome: string; cpf: string },
+    rowNum: number
+  ): string | null => {
+    if (!r.nome || r.nome.length < 3)
+      return `Linha ${rowNum}: Nome inválido ("${r.nome}")`;
+    if (r.cpf.length !== 11)
+      return `Linha ${rowNum}: CPF inválido — ${r.cpf.length} dígitos encontrados`;
+    return null;
+  };
+
+  const handleImportExFilesChange = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    setImportExResult(null);
+    setImportExErrors([]);
+    setImportExPreview([]);
+    setImportExTypeErrors([]);
+
+    const invalid = fileArray.filter((f) => !isAllowedFile(f));
+    const valid = fileArray.filter((f) => isAllowedFile(f));
+
+    if (invalid.length > 0) {
+      setImportExTypeErrors(
+        invalid.map(
+          (f) => `"${f.name}" não é permitido. Apenas .csv, .xlsx ou .xls.`
+        )
+      );
+    }
+    if (valid.length === 0) {
+      setImportExFiles([]);
+      return;
+    }
+    setImportExFiles(valid);
+
+    try {
+      const allRows: any[] = [];
+      for (const file of valid) {
+        const rows = await parseFile(file);
+        allRows.push(...rows);
+      }
+      if (allRows.length === 0) {
+        setImportExErrors([
+          "Arquivo(s) vazio(s) ou sem dados. Verifique se a primeira linha é o cabeçalho (nome, cpf).",
+        ]);
+        return;
+      }
+      const normalized = allRows.map((r) => ({
+        ...normalizeExRow(r),
+        _row: r._row,
+      }));
+      const errors: string[] = [];
+      normalized.forEach((r) => {
+        const err = validateExRow(r, r._row);
+        if (err) errors.push(err);
+      });
+      setImportExErrors(errors);
+      setImportExPreview(normalized);
+    } catch {
+      setImportExErrors(["Erro ao processar arquivo(s)."]);
+    }
+  };
+
+  const handleImportExSubmit = async () => {
+    if (importExPreview.length === 0 || importExErrors.length > 0) return;
+    setImportExLoading(true);
+    setImportExResult(null);
+
+    try {
+      const cpfsExistentes = new Set<string>();
+      try {
+        const snap = await getDocs(collection(db, "exalunos"));
+        snap.forEach((d) => {
+          const cpf = (d.data().cpf || "").replace(/\D/g, "");
+          if (cpf) cpfsExistentes.add(cpf);
+        });
+      } catch (e) {
+        console.warn("Erro ao buscar ex-alunos existentes:", e);
+      }
+
+      let success = 0,
+        failed = 0,
+        duplicates = 0;
+
+      for (const row of importExPreview) {
+        const err = validateExRow(row, row._row);
+        if (err) {
+          failed++;
+          continue;
+        }
+        if (cpfsExistentes.has(row.cpf)) {
+          duplicates++;
+          continue;
+        }
+        try {
+          const nomeId =
+            row.nome.trim().replace(/\s+/g, "_") + "_" + row.cpf.slice(-4);
+          await setDoc(doc(db, "exalunos", nomeId), {
+            nome: row.nome,
+            cpf: row.cpf,
+            tipo: "ex_aluno",
+            criadoEm: new Date().toISOString(),
+          });
+          cpfsExistentes.add(row.cpf);
+          success++;
+        } catch (e) {
+          console.error("Erro ao salvar ex-aluno:", row, e);
+          failed++;
+        }
+      }
+
+      setImportExResult({ success, failed, duplicates });
+      if (success > 0) {
+        showToast(`${success} ex-aluno(s) importado(s) com sucesso!`, "success");
+      } else {
+        showToast("Nenhum ex-aluno importado. Verifique os dados.", "error");
+      }
+    } catch (e) {
+      console.error("Erro geral na importação de ex-alunos:", e);
+      showToast("Erro durante a importação.", "error");
+    }
+    setImportExLoading(false);
+  };
+
+  // ── Pesquisa de Ex-Alunos ──
+  const handleExAlunoSearch = async () => {
+    setExAlunoLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "exalunos"));
+      const termo = exAlunoSearch
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      const termoCpf = exAlunoSearch.replace(/\D/g, "");
+      const list: any[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        const nomeNorm = (data.nome || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+        const cpfDigits = (data.cpf || "").replace(/\D/g, "");
+        const match =
+          termo === ""
+            ? true
+            : nomeNorm.includes(termo) ||
+              (termoCpf.length > 0 && cpfDigits.includes(termoCpf));
+        if (match) list.push({ id: d.id, ...data });
+      });
+      list.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setExAlunoResults(list);
+    } catch (e) {
+      console.error("Erro ao pesquisar ex-alunos:", e);
+      showToast("Erro ao pesquisar ex-alunos.");
+    }
+    setExAlunoLoading(false);
+  };
+
+  const handleDeleteExAluno = async () => {
+    if (!confirmDeleteExAluno) return;
+    setDeleteExAlunoLoading(true);
+    try {
+      await deleteDoc(doc(db, "exalunos", confirmDeleteExAluno.id));
+      setExAlunoResults((prev) =>
+        prev.filter((r) => r.id !== confirmDeleteExAluno.id)
+      );
+      showToast("Ex-aluno removido.", "success");
+      setConfirmDeleteExAluno(null);
+    } catch (e) {
+      console.error("Erro ao remover ex-aluno:", e);
+      showToast("Erro ao remover ex-aluno.");
+    }
+    setDeleteExAlunoLoading(false);
+  };
+
+  // ─── PARSE/VALIDAÇÃO/IMPORTAÇÃO DE LISTA DE PAIS (layout mãe+pai por linha) ───
+  // Lê a planilha sem cabeçalho fixo: detecta seções de turma (ex: "1º A")
+  // e, para cada linha de dados (nº | mãe | cpf | pai | cpf), gera até dois
+  // responsáveis vinculados à turma da seção. CPF é opcional por coluna —
+  // só vira responsável a coluna que tiver nome + CPF de 11 dígitos.
+
+  // Lê um File em matriz de linhas (array de arrays), sem assumir cabeçalho.
+  const parseFileMatrix = async (file: File): Promise<any[][]> => {
+    const XLSX = await loadXLSX();
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: "array", raw: false });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  };
+
+  // Extrai ano (1-3) e turma (A-L) de um texto como "1º A" / "2°B".
+  const extrairAnoTurma = (
+    texto: string
+  ): { ano: string; turma: string } | null => {
+    const t = String(texto || "")
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    const m = t.match(/\b([123])\s*º?°?\s*([A-L])\b/);
+    if (m) return { ano: m[1], turma: m[2] };
+    return null;
+  };
+
+  const handleImportListaFilesChange = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    setImportListaResult(null);
+    setImportListaErrors([]);
+    setImportListaPreview([]);
+    setImportListaTypeErrors([]);
+
+    const invalid = fileArray.filter((f) => !isAllowedFile(f));
+    const valid = fileArray.filter((f) => isAllowedFile(f));
+
+    if (invalid.length > 0) {
+      setImportListaTypeErrors(
+        invalid.map(
+          (f) => `"${f.name}" não é permitido. Apenas .csv, .xlsx ou .xls.`
+        )
+      );
+    }
+    if (valid.length === 0) {
+      setImportListaFiles([]);
+      return;
+    }
+    setImportListaFiles(valid);
+
+    try {
+      const registros: any[] = [];
+      for (const file of valid) {
+        const matrix = await parseFileMatrix(file);
+        let ano = "";
+        let turma = "";
+        for (let i = 0; i < matrix.length; i++) {
+          const linha = (matrix[i] || []).map((c) => String(c ?? "").trim());
+          // Atualiza a turma corrente se alguma célula indicar "Xº Y"
+          for (const cel of linha) {
+            const at = extrairAnoTurma(cel);
+            if (at) {
+              ano = at.ano;
+              turma = at.turma;
+            }
+          }
+          // Linha de dados: 1ª coluna é um número de ordem (1,2,3...)
+          const primeira = linha[0] || "";
+          if (!/^\d+$/.test(primeira)) continue;
+          if (!ano || !turma) continue;
+
+          const maeNome = (linha[1] || "").trim();
+          const maeCpf = (linha[2] || "").replace(/\D/g, "");
+          const paiNome = (linha[3] || "").trim();
+          const paiCpf = (linha[4] || "").replace(/\D/g, "");
+
+          if (maeNome.length >= 2 && maeCpf.length === 11) {
+            registros.push({
+              nome: maeNome,
+              cpf: maeCpf,
+              relacao: "mae",
+              ano,
+              turma,
+              _row: i + 1,
+            });
+          }
+          if (paiNome.length >= 2 && paiCpf.length === 11) {
+            registros.push({
+              nome: paiNome,
+              cpf: paiCpf,
+              relacao: "pai",
+              ano,
+              turma,
+              _row: i + 1,
+            });
+          }
+        }
+      }
+
+      if (registros.length === 0) {
+        setImportListaErrors([
+          "Nenhum responsável válido encontrado. Confira se a planilha segue o layout: seções de turma (ex: 1º A) e linhas com nº, mãe, CPF, pai, CPF.",
+        ]);
+        return;
+      }
+      setImportListaPreview(registros);
+    } catch (e) {
+      console.error("Erro ao processar lista de pais:", e);
+      setImportListaErrors(["Erro ao processar arquivo(s)."]);
+    }
+  };
+
+  const handleImportListaSubmit = async () => {
+    if (importListaPreview.length === 0 || importListaErrors.length > 0) return;
+    setImportListaLoading(true);
+    setImportListaResult(null);
+
+    try {
+      const cpfsExistentes = new Set<string>();
+      const snapResp = await getDocs(collection(db, "responsaveis"));
+      snapResp.forEach((d) => {
+        const cpf = (d.data().cpf || "").replace(/\D/g, "");
+        if (cpf) cpfsExistentes.add(cpf);
+      });
+
+      let success = 0,
+        failed = 0,
+        duplicates = 0;
+
+      for (const row of importListaPreview) {
+        if (cpfsExistentes.has(row.cpf)) {
+          duplicates++;
+          continue;
+        }
+        try {
+          const turmaId = `${row.ano}${row.turma}`;
+          const respData: any = {
+            nome: row.nome,
+            cpf: row.cpf,
+            relacao: row.relacao, // "mae" | "pai"
+            alunoTurma: turmaId,
+            alunoAno: row.ano,
+            criadoEm: new Date().toISOString(),
+          };
+          const nomeId =
+            row.nome.trim().replace(/\s+/g, "_") + "_" + row.cpf.slice(-4);
+          await setDoc(doc(db, "responsaveis", nomeId), respData);
+          cpfsExistentes.add(row.cpf);
+          success++;
+        } catch (e) {
+          console.error("Erro ao salvar responsável (lista):", row, e);
+          failed++;
+        }
+      }
+
+      setImportListaResult({ success, failed, duplicates });
+      if (success > 0) {
+        showToast(
+          `${success} responsável(is) importado(s) com sucesso!`,
+          "success"
+        );
+      } else {
+        showToast("Nenhum responsável importado. Verifique os dados.", "error");
+      }
+    } catch (e) {
+      console.error("Erro geral na importação de lista de pais:", e);
+      showToast("Erro durante a importação.", "error");
+    }
+    setImportListaLoading(false);
   };
 
   // ── Limpar turma completa do Firebase ──
@@ -2678,6 +3086,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         visivel: batchModal.visivel !== undefined ? batchModal.visivel : true,
         turmasVisiveis: todasMarcadas ? null : turmasSelecionadas,
         esgotado: batchModal.esgotado === true,
+        exAluno: batchModal.exAluno === true,
       };
 
       if (batchModal.id) {
@@ -5287,28 +5696,17 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                     </p>
                   </div>
 
-                  {/* Toggle Alunos / Pais */}
-                  <div className="flex gap-1 bg-zinc-900/60 border border-zinc-800 rounded-xl p-1">
-                    {(["alunos", "pais"] as const).map((tab) => (
+                  {/* Toggle Alunos / Responsáveis / Lista de Pais / Ex-Alunos */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-zinc-900/60 border border-zinc-800 rounded-xl p-1">
+                    {(
+                      ["alunos", "pais", "paislista", "exalunos"] as const
+                    ).map((tab) => (
                       <button
                         key={tab}
                         onClick={() => {
                           setImportSubTab(tab);
-                          if (tab === "alunos") {
-                            setImportParentFiles([]);
-                            setImportParentPreview([]);
-                            setImportParentErrors([]);
-                            setImportParentResult(null);
-                            setImportParentTypeErrors([]);
-                          } else {
-                            setImportFiles([]);
-                            setImportPreview([]);
-                            setImportErrors([]);
-                            setImportResult(null);
-                            setImportTypeErrors([]);
-                          }
                         }}
-                        className={`flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-bold transition-all ${
+                        className={`flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-bold transition-all ${
                           importSubTab === tab
                             ? "bg-white text-black"
                             : "text-zinc-500 hover:text-white"
@@ -5316,10 +5714,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                       >
                         {tab === "alunos" ? (
                           <GraduationCap className="h-3.5 w-3.5" />
+                        ) : tab === "exalunos" ? (
+                          <FaRegAddressCard className="h-3.5 w-3.5" />
                         ) : (
                           <User className="h-3.5 w-3.5" />
                         )}
-                        {tab === "alunos" ? "Alunos" : "Responsáveis"}
+                        {tab === "alunos"
+                          ? "Alunos"
+                          : tab === "pais"
+                          ? "Responsáveis"
+                          : tab === "paislista"
+                          ? "Lista de Pais"
+                          : "Ex-Alunos"}
                       </button>
                     ))}
                   </div>
@@ -6128,6 +6534,572 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                             )}
                           </button>
                         )}
+                    </>
+                  )}
+
+                  {/* ── IMPORTAR LISTA DE PAIS (mãe+pai por linha) ── */}
+                  {importSubTab === "paislista" && (
+                    <>
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                        <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                        <div className="space-y-2 text-sm text-zinc-400">
+                          <p className="font-semibold text-white">
+                            Lista de Pais (formato da secretaria):
+                          </p>
+                          <p>
+                            Use a planilha original{" "}
+                            <span className="text-white font-semibold">
+                              .xls
+                            </span>
+                            ,{" "}
+                            <span className="text-white font-semibold">
+                              .xlsx
+                            </span>{" "}
+                            ou{" "}
+                            <span className="text-white font-semibold">
+                              .csv
+                            </span>{" "}
+                            no layout: seções por turma (ex:{" "}
+                            <span className="text-zinc-300 font-mono">1º A</span>
+                            ) e linhas com{" "}
+                            <span className="text-zinc-300 font-mono">
+                              nº · mãe · CPF · pai · CPF
+                            </span>
+                            .
+                          </p>
+                          <ul className="space-y-1 text-zinc-500 text-xs mt-2 list-disc list-inside">
+                            <li>
+                              A turma é detectada automaticamente pelas seções
+                              (1º A … 3º L).
+                            </li>
+                            <li>
+                              Cada linha gera até 2 responsáveis (mãe e pai).
+                            </li>
+                            <li>
+                              Colunas sem CPF válido (11 dígitos) são ignoradas.
+                            </li>
+                            <li>CPF já cadastrado é ignorado.</li>
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setImportListaDragActive(true);
+                        }}
+                        onDragLeave={() => setImportListaDragActive(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setImportListaDragActive(false);
+                          if (e.dataTransfer.files.length > 0)
+                            handleImportListaFilesChange(e.dataTransfer.files);
+                        }}
+                        onClick={() => importListaFileRef.current?.click()}
+                        className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                          importListaDragActive
+                            ? "border-white bg-white/5"
+                            : importListaFiles.length > 0
+                            ? "border-zinc-600 bg-[#0a0a0a]"
+                            : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                        }`}
+                      >
+                        <input
+                          ref={importListaFileRef}
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0)
+                              handleImportListaFilesChange(e.target.files);
+                          }}
+                        />
+                        {importListaFiles.length > 0 ? (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <FileSpreadsheet className="h-7 w-7 text-white" />
+                            </div>
+                            <p className="text-white font-semibold text-sm text-center">
+                              {importListaFiles.length === 1
+                                ? importListaFiles[0].name
+                                : `${importListaFiles.length} arquivos selecionados`}
+                            </p>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setImportListaFiles([]);
+                                setImportListaPreview([]);
+                                setImportListaErrors([]);
+                                setImportListaResult(null);
+                                setImportListaTypeErrors([]);
+                              }}
+                              className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                            >
+                              Remover arquivo(s)
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                              <FileUp className="h-7 w-7 text-zinc-500" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-white font-semibold text-sm">
+                                Arraste a Lista de Pais aqui
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-1">
+                                ou clique para selecionar — .xls, .xlsx ou .csv
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {importListaTypeErrors.length > 0 && (
+                        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="h-4 w-4 text-orange-400" />
+                            <p className="text-sm font-bold text-orange-400">
+                              Arquivo(s) não aceito(s)
+                            </p>
+                          </div>
+                          <ul className="space-y-1">
+                            {importListaTypeErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-orange-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {importListaErrors.length > 0 && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5">
+                          <ul className="space-y-1">
+                            {importListaErrors.map((err, i) => (
+                              <li key={i} className="text-xs text-red-300">
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {importListaPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importListaPreview.length} responsáveis
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{ maxHeight: "420px" }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="text-left text-zinc-500 text-xs">
+                                  <th className="px-4 py-2 font-semibold">
+                                    Nome
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold">
+                                    Relação
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold">
+                                    Turma
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold">
+                                    CPF
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importListaPreview.map((r, i) => (
+                                  <tr
+                                    key={i}
+                                    className="border-t border-zinc-900"
+                                  >
+                                    <td className="px-4 py-2 text-white">
+                                      {r.nome}
+                                    </td>
+                                    <td className="px-4 py-2 text-zinc-400 capitalize">
+                                      {r.relacao}
+                                    </td>
+                                    <td className="px-4 py-2 text-zinc-400 font-mono">
+                                      {r.ano}
+                                      {r.turma}
+                                    </td>
+                                    <td className="px-4 py-2 text-zinc-400 font-mono">
+                                      {r.cpf}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {importListaResult && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 space-y-1 text-sm">
+                          <p className="text-green-400 font-semibold">
+                            {importListaResult.success} importado(s)
+                          </p>
+                          <p className="text-zinc-500">
+                            {importListaResult.duplicates} duplicado(s) ·{" "}
+                            {importListaResult.failed} com erro
+                          </p>
+                          <button
+                            onClick={() => {
+                              setImportListaFiles([]);
+                              setImportListaPreview([]);
+                              setImportListaErrors([]);
+                              setImportListaResult(null);
+                              setImportListaTypeErrors([]);
+                            }}
+                            className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                          >
+                            Importar outra planilha
+                          </button>
+                        </div>
+                      )}
+
+                      {importListaPreview.length > 0 &&
+                        importListaErrors.length === 0 &&
+                        !importListaResult && (
+                          <button
+                            onClick={handleImportListaSubmit}
+                            disabled={importListaLoading}
+                            className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                          >
+                            {importListaLoading ? (
+                              <>
+                                <Loader2 className="h-5 w-5 animate-spin" />{" "}
+                                Importando responsáveis...
+                              </>
+                            ) : (
+                              <>
+                                <FileUp className="h-5 w-5" /> Importar{" "}
+                                {importListaPreview.length} Responsáveis
+                              </>
+                            )}
+                          </button>
+                        )}
+                    </>
+                  )}
+
+                  {/* ── EX-ALUNOS: IMPORTAR + PESQUISAR ── */}
+                  {importSubTab === "exalunos" && (
+                    <>
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 flex gap-4">
+                        <Info className="h-5 w-5 text-zinc-500 shrink-0 mt-0.5" />
+                        <div className="space-y-2 text-sm text-zinc-400">
+                          <p className="font-semibold text-white">
+                            Importar Ex-Alunos:
+                          </p>
+                          <p>
+                            Planilha simples com apenas duas colunas. A primeira
+                            linha deve ser o cabeçalho:
+                          </p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {["nome", "cpf"].map((col) => (
+                              <span
+                                key={col}
+                                className="font-mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1 rounded-lg text-zinc-300"
+                              >
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="text-zinc-600 text-xs">
+                            Salvos na coleção de ex-alunos (tipo{" "}
+                            <span className="font-mono">ex_aluno</span>). CPF já
+                            cadastrado é ignorado.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setImportExDragActive(true);
+                        }}
+                        onDragLeave={() => setImportExDragActive(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setImportExDragActive(false);
+                          if (e.dataTransfer.files.length > 0)
+                            handleImportExFilesChange(e.dataTransfer.files);
+                        }}
+                        onClick={() => importExFileRef.current?.click()}
+                        className={`relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 cursor-pointer transition-all ${
+                          importExDragActive
+                            ? "border-white bg-white/5"
+                            : importExFiles.length > 0
+                            ? "border-zinc-600 bg-[#0a0a0a]"
+                            : "border-zinc-800 bg-[#0a0a0a] hover:border-zinc-600 hover:bg-zinc-900/20"
+                        }`}
+                      >
+                        <input
+                          ref={importExFileRef}
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0)
+                              handleImportExFilesChange(e.target.files);
+                          }}
+                        />
+                        {importExFiles.length > 0 ? (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                              <FileSpreadsheet className="h-7 w-7 text-white" />
+                            </div>
+                            <p className="text-white font-semibold text-sm text-center">
+                              {importExFiles.length === 1
+                                ? importExFiles[0].name
+                                : `${importExFiles.length} arquivos selecionados`}
+                            </p>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setImportExFiles([]);
+                                setImportExPreview([]);
+                                setImportExErrors([]);
+                                setImportExResult(null);
+                                setImportExTypeErrors([]);
+                              }}
+                              className="text-xs text-zinc-500 hover:text-white transition-colors underline underline-offset-2"
+                            >
+                              Remover arquivo(s)
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                              <FileUp className="h-7 w-7 text-zinc-500" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-white font-semibold text-sm">
+                                Arraste a planilha de ex-alunos
+                              </p>
+                              <p className="text-zinc-500 text-xs mt-1">
+                                ou clique para selecionar — .csv, .xlsx ou .xls
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {importExTypeErrors.length > 0 && (
+                        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5">
+                          <ul className="space-y-1">
+                            {importExTypeErrors.map((err, i) => (
+                              <li
+                                key={i}
+                                className="text-xs text-orange-300 font-mono"
+                              >
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {importExErrors.length > 0 && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5">
+                          <ul className="space-y-1">
+                            {importExErrors.map((err, i) => (
+                              <li key={i} className="text-xs text-red-300">
+                                {err}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {importExPreview.length > 0 && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl overflow-hidden">
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                            <p className="text-sm font-bold text-white">
+                              Pré-visualização
+                            </p>
+                            <span className="text-xs text-zinc-500">
+                              {importExPreview.length} ex-alunos
+                            </span>
+                          </div>
+                          <div
+                            className="overflow-y-auto"
+                            style={{ maxHeight: "360px" }}
+                          >
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                <tr className="text-left text-zinc-500 text-xs">
+                                  <th className="px-4 py-2 font-semibold">
+                                    Nome
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold">
+                                    CPF
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importExPreview.map((r, i) => (
+                                  <tr
+                                    key={i}
+                                    className="border-t border-zinc-900"
+                                  >
+                                    <td className="px-4 py-2 text-white">
+                                      {r.nome}
+                                    </td>
+                                    <td className="px-4 py-2 text-zinc-400 font-mono">
+                                      {r.cpf}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {importExResult && (
+                        <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 space-y-1 text-sm">
+                          <p className="text-green-400 font-semibold">
+                            {importExResult.success} importado(s)
+                          </p>
+                          <p className="text-zinc-500">
+                            {importExResult.duplicates} duplicado(s) ·{" "}
+                            {importExResult.failed} com erro
+                          </p>
+                          <button
+                            onClick={() => {
+                              setImportExFiles([]);
+                              setImportExPreview([]);
+                              setImportExErrors([]);
+                              setImportExResult(null);
+                              setImportExTypeErrors([]);
+                            }}
+                            className="w-full mt-4 h-11 rounded-xl border border-zinc-800 bg-transparent text-zinc-500 text-sm font-medium hover:bg-zinc-900 hover:text-white transition-all"
+                          >
+                            Importar outra planilha
+                          </button>
+                        </div>
+                      )}
+
+                      {importExPreview.length > 0 &&
+                        importExErrors.length === 0 &&
+                        !importExResult && (
+                          <button
+                            onClick={handleImportExSubmit}
+                            disabled={importExLoading}
+                            className="w-full h-14 rounded-2xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                          >
+                            {importExLoading ? (
+                              <>
+                                <Loader2 className="h-5 w-5 animate-spin" />{" "}
+                                Importando ex-alunos...
+                              </>
+                            ) : (
+                              <>
+                                <FileUp className="h-5 w-5" /> Importar{" "}
+                                {importExPreview.length} Ex-Alunos
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                      {/* ── PESQUISAR EX-ALUNOS ── */}
+                      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-5 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Search className="h-4 w-4 text-zinc-500" />
+                          <p className="text-sm font-bold text-white">
+                            Pesquisar Ex-Alunos
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            value={exAlunoSearch}
+                            onChange={(e) => setExAlunoSearch(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleExAlunoSearch();
+                            }}
+                            placeholder="Nome ou CPF (deixe vazio para listar todos)"
+                            className="flex-1 h-11 rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:ring-1 focus:ring-white"
+                          />
+                          <button
+                            onClick={handleExAlunoSearch}
+                            disabled={exAlunoLoading}
+                            className="h-11 px-5 rounded-xl bg-white text-black text-sm font-bold hover:bg-zinc-200 transition-all disabled:opacity-60"
+                          >
+                            {exAlunoLoading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              "Buscar"
+                            )}
+                          </button>
+                        </div>
+
+                        {exAlunoResults.length > 0 && (
+                          <div className="border border-zinc-800 rounded-xl overflow-hidden">
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="bg-zinc-900/50">
+                                <tr className="text-left text-zinc-500 text-xs">
+                                  <th className="px-4 py-2 font-semibold">
+                                    Nome
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold">
+                                    CPF
+                                  </th>
+                                  <th className="px-4 py-2 font-semibold text-right">
+                                    Ações
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {exAlunoResults.map((r) => (
+                                  <tr
+                                    key={r.id}
+                                    className="border-t border-zinc-900"
+                                  >
+                                    <td className="px-4 py-2 text-white">
+                                      {r.nome}
+                                    </td>
+                                    <td className="px-4 py-2 text-zinc-400 font-mono">
+                                      {r.cpf}
+                                    </td>
+                                    <td className="px-4 py-2 text-right">
+                                      <button
+                                        onClick={() =>
+                                          setConfirmDeleteExAluno(r)
+                                        }
+                                        className="text-xs text-red-400 hover:text-red-300 font-semibold"
+                                      >
+                                        Excluir
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {!exAlunoLoading &&
+                          exAlunoResults.length === 0 &&
+                          exAlunoSearch !== "" && (
+                            <p className="text-zinc-600 text-xs">
+                              Nenhum ex-aluno encontrado.
+                            </p>
+                          )}
+                      </div>
                     </>
                   )}
                 </div>
@@ -9333,6 +10305,39 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 </select>
               </div>
 
+              {/* ── Lote exclusivo de Ex-Alunos ── */}
+              <button
+                type="button"
+                onClick={() =>
+                  setBatchModal({
+                    ...batchModal,
+                    exAluno: !batchModal.exAluno,
+                  })
+                }
+                className="w-full flex items-center justify-between gap-3 border border-zinc-800 rounded-xl px-4 py-3.5 hover:bg-zinc-900 transition-colors text-left"
+              >
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-white">
+                    Lote exclusivo de Ex-Alunos
+                  </span>
+                  <span className="text-xs text-zinc-500">
+                    Visível e validável apenas para CPFs cadastrados como
+                    ex-alunos.
+                  </span>
+                </div>
+                <div
+                  className={`relative w-11 h-6 rounded-full shrink-0 transition-colors ${
+                    batchModal.exAluno ? "bg-green-500" : "bg-zinc-700"
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                      batchModal.exAluno ? "translate-x-5" : ""
+                    }`}
+                  />
+                </div>
+              </button>
+
               {/* ── Visibilidade por Turma ── */}
               {(batchModal.publico || "Ambos") !== "Pais/Responsáveis" && (
               <div className="border border-zinc-800 rounded-xl overflow-hidden">
@@ -10473,6 +11478,61 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {deletingBatch && <Loader2 className="h-4 w-4 animate-spin" />}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: EXCLUIR EX-ALUNO ── */}
+      {confirmDeleteExAluno && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() =>
+            !deleteExAlunoLoading && setConfirmDeleteExAluno(null)
+          }
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200 p-7 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-base">
+                  Excluir Ex-Aluno
+                </h3>
+                <p className="text-zinc-500 text-xs mt-0.5">
+                  Esta ação não pode ser desfeita
+                </p>
+              </div>
+            </div>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              Tem certeza que deseja excluir{" "}
+              <span className="text-white font-semibold">
+                "{confirmDeleteExAluno.nome}"
+              </span>
+              ?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmDeleteExAluno(null)}
+                disabled={deleteExAlunoLoading}
+                className="flex-1 h-11 rounded-xl border border-zinc-800 text-zinc-300 text-sm font-semibold hover:bg-zinc-900 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteExAluno}
+                disabled={deleteExAlunoLoading}
+                className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {deleteExAlunoLoading && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
                 Excluir
               </button>
             </div>
