@@ -444,6 +444,20 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
     null
   );
   const [deleteExAlunoLoading, setDeleteExAlunoLoading] = useState(false);
+  // Modal de ex-aluno (mesmo padrão do modal de aluno/responsável)
+  const [exAlunoModal, setExAlunoModal] = useState<any | null>(null);
+  const [exAlunoModalTicket, setExAlunoModalTicket] = useState<any | null>(
+    null
+  );
+  const [exAlunoModalLoading, setExAlunoModalLoading] = useState(false);
+  const [associarExAlunoForm, setAssociarExAlunoForm] = useState({
+    loteId: "",
+    email: "",
+    status: "pendente",
+    pago: false,
+    metodoPagamento: null as "dinheiro" | null,
+  });
+  const [associarExAlunoLoading, setAssociarExAlunoLoading] = useState(false);
 
   // Estados: Importação de Lista de Pais (layout mãe+pai por linha, turma por seção)
   const [importListaFiles, setImportListaFiles] = useState<File[]>([]);
@@ -1511,6 +1525,9 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
       setExAlunoResults((prev) =>
         prev.filter((r) => r.id !== confirmDeleteExAluno.id)
       );
+      if (exAlunoModal && exAlunoModal.id === confirmDeleteExAluno.id) {
+        setExAlunoModal(null);
+      }
       showToast("Ex-aluno removido.", "success");
       setConfirmDeleteExAluno(null);
     } catch (e) {
@@ -1518,6 +1535,169 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
       showToast("Erro ao remover ex-aluno.");
     }
     setDeleteExAlunoLoading(false);
+  };
+
+  // ── Abre modal do ex-aluno e busca seu ingresso ──
+  const openExAlunoModal = async (ex: any) => {
+    setExAlunoModal(ex);
+    setExAlunoModalTicket(null);
+    setExAlunoModalLoading(true);
+    setAssociarExAlunoForm({
+      loteId: "",
+      email: "",
+      status: "pendente",
+      pago: false,
+      metodoPagamento: null,
+    });
+    try {
+      const cpfDigits = (ex.cpf || "").replace(/\D/g, "");
+      const ticket = allTickets.find(
+        (t) =>
+          (t.cpf || "").replace(/\D/g, "") === cpfDigits ||
+          (usersMap[t.userId] || "").replace(/\D/g, "") === cpfDigits
+      );
+      setExAlunoModalTicket(ticket || null);
+    } catch {}
+    setExAlunoModalLoading(false);
+  };
+
+  // ── Associar ingresso ao ex-aluno (sobe como tipo ex_aluno) ──
+  const handleAssociarIngressoExAluno = async () => {
+    if (!exAlunoModal || !associarExAlunoForm.loteId) return;
+    setAssociarExAlunoLoading(true);
+    try {
+      const uniqueCode = await generateTicketCode(db);
+      const usado = associarExAlunoForm.status === "validado";
+      const agora = new Date().toISOString();
+      const loteSelecionado = batches.find(
+        (b) => b.id === associarExAlunoForm.loteId
+      );
+      const cpfDigits = (exAlunoModal.cpf || "").replace(/\D/g, "");
+      const userId = (await findUserIdByCpf(db, cpfDigits)) || `manual_${uniqueCode}`;
+      const ticketData = {
+        userId,
+        nomeAluno: exAlunoModal.nome,
+        ano: "",
+        turma: "",
+        type: loteSelecionado?.nome || "Acesso Geral",
+        loteId: loteSelecionado?.id || null,
+        qty: 1,
+        price: loteSelecionado?.preco || 0,
+        code: uniqueCode,
+        criadoEm: agora,
+        usado,
+        horaEntrada: usado ? agora : null,
+        cpf: cpfDigits,
+        email: associarExAlunoForm.email || "",
+        origem: "manual_admin",
+        tipoTitular: "ex_aluno",
+        pagamentoConfirmado: associarExAlunoForm.pago,
+        dataPagamento: associarExAlunoForm.pago ? agora : null,
+        metodoPagamento: associarExAlunoForm.pago
+          ? associarExAlunoForm.metodoPagamento === "dinheiro"
+            ? "dinheiro"
+            : "pix"
+          : null,
+      };
+      await setDoc(doc(db, "ingressos", uniqueCode), ticketData);
+
+      if (loteSelecionado?.id) {
+        try {
+          await updateDoc(doc(db, "lotes", loteSelecionado.id), {
+            ingressosAssociados: increment(1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === loteSelecionado.id
+                ? { ...b, ingressosAssociados: (b.ingressosAssociados || 0) + 1 }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao incrementar contador do lote:", e);
+        }
+      }
+
+      setAllTickets((prev) =>
+        [...prev, { id: uniqueCode, ...ticketData }].sort((a, b) =>
+          (a.nomeAluno || "").localeCompare(b.nomeAluno || "")
+        )
+      );
+      setExAlunoModalTicket({ id: uniqueCode, ...ticketData });
+      showToast("Ingresso associado com sucesso!", "success");
+    } catch {
+      showToast("Erro ao associar ingresso.");
+    }
+    setAssociarExAlunoLoading(false);
+  };
+
+  // ── Validar/Desvalidar ingresso do ex-aluno ──
+  const handleToggleValidarExAluno = async () => {
+    if (!exAlunoModalTicket) return;
+    setExAlunoModalLoading(true);
+    try {
+      const agora = new Date().toISOString();
+      const novoUsado = !exAlunoModalTicket.usado;
+      await updateDoc(doc(db, "ingressos", exAlunoModalTicket.id), {
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      });
+      const updated = {
+        ...exAlunoModalTicket,
+        usado: novoUsado,
+        horaEntrada: novoUsado ? agora : null,
+      };
+      setExAlunoModalTicket(updated);
+      setAllTickets((prev) =>
+        prev.map((t) => (t.id === exAlunoModalTicket.id ? updated : t))
+      );
+      showToast(
+        novoUsado ? "Ingresso validado!" : "Validação desfeita!",
+        "success"
+      );
+    } catch {
+      showToast("Erro ao atualizar ingresso.");
+    }
+    setExAlunoModalLoading(false);
+  };
+
+  // ── Excluir ingresso do ex-aluno ──
+  const handleExcluirIngressoExAluno = async () => {
+    if (!exAlunoModalTicket) return;
+    setExAlunoModalLoading(true);
+    try {
+      await deleteDoc(doc(db, "ingressos", exAlunoModalTicket.id));
+      if (exAlunoModalTicket.loteId) {
+        try {
+          await updateDoc(doc(db, "lotes", exAlunoModalTicket.loteId), {
+            ingressosAssociados: increment(-1),
+          });
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === exAlunoModalTicket.loteId
+                ? {
+                    ...b,
+                    ingressosAssociados: Math.max(
+                      0,
+                      (b.ingressosAssociados || 0) - 1
+                    ),
+                  }
+                : b
+            )
+          );
+        } catch (e) {
+          console.warn("Erro ao decrementar contador do lote:", e);
+        }
+      }
+      setAllTickets((prev) =>
+        prev.filter((t) => t.id !== exAlunoModalTicket.id)
+      );
+      setExAlunoModalTicket(null);
+      showToast("Ingresso excluído!", "success");
+    } catch {
+      showToast("Erro ao excluir ingresso.");
+    }
+    setExAlunoModalLoading(false);
   };
 
   // ─── PARSE/VALIDAÇÃO/IMPORTAÇÃO DE LISTA DE PAIS (layout mãe+pai por linha) ───
@@ -7077,14 +7257,24 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                                       {r.cpf}
                                     </td>
                                     <td className="px-4 py-2 text-right">
-                                      <button
-                                        onClick={() =>
-                                          setConfirmDeleteExAluno(r)
-                                        }
-                                        className="text-xs text-red-400 hover:text-red-300 font-semibold"
-                                      >
-                                        Excluir
-                                      </button>
+                                      <div className="flex items-center justify-end gap-1">
+                                        <button
+                                          onClick={() => openExAlunoModal(r)}
+                                          className="w-8 h-8 flex items-center justify-center rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                                          title="Ver detalhes / ingresso"
+                                        >
+                                          <IoMdInformationCircleOutline className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            setConfirmDeleteExAluno(r)
+                                          }
+                                          className="w-8 h-8 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                                          title="Excluir ex-aluno"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
@@ -11480,6 +11670,349 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 {deletingBatch && <Loader2 className="h-4 w-4 animate-spin" />}
                 Excluir
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DO EX-ALUNO ── */}
+      {exAlunoModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setExAlunoModal(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl max-h-[92vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                  <FaRegAddressCard className="h-5 w-5 text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">
+                    {exAlunoModal.nome}
+                  </p>
+                  <p className="text-zinc-500 text-xs mt-0.5">Ex-Aluno</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setConfirmDeleteExAluno(exAlunoModal)}
+                  className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-full transition-colors"
+                  title="Excluir ex-aluno"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setExAlunoModal(null)}
+                  className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+              {exAlunoModalLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 text-zinc-600 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Dados cadastrais */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Dados Cadastrais
+                    </p>
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl divide-y divide-zinc-800/60">
+                      {[
+                        { label: "CPF", value: formatCpf(exAlunoModal.cpf) },
+                        {
+                          label: "Cadastrado em",
+                          value: exAlunoModal.criadoEm
+                            ? new Date(
+                                exAlunoModal.criadoEm
+                              ).toLocaleDateString("pt-BR")
+                            : null,
+                        },
+                      ].map(({ label, value }) => (
+                        <div
+                          key={label}
+                          className="flex items-center justify-between px-4 py-3"
+                        >
+                          <span className="text-zinc-500 text-xs font-semibold">
+                            {label}
+                          </span>
+                          <span
+                            className={`text-xs font-mono ${
+                              value ? "text-white" : "text-zinc-700 italic"
+                            }`}
+                          >
+                            {value || "não informado"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Seção de Ingresso */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Ingresso
+                    </p>
+
+                    {exAlunoModalTicket ? (
+                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
+                        <div
+                          className={`flex items-center gap-2 px-4 py-3 border-b border-zinc-800 ${
+                            exAlunoModalTicket.usado
+                              ? "bg-green-500/5"
+                              : "bg-zinc-900/30"
+                          }`}
+                        >
+                          {exAlunoModalTicket.usado ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />
+                              <span className="text-green-400 text-xs font-bold">
+                                Validado — entrada confirmada
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="h-4 w-4 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-400 text-xs font-bold">
+                                Pendente de validação
+                              </span>
+                            </>
+                          )}
+                          <span className="ml-auto px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 text-[9px] font-bold tracking-widest">
+                            EX-ALUNO
+                          </span>
+                        </div>
+                        <div className="divide-y divide-zinc-800/60">
+                          {[
+                            { label: "Código", value: exAlunoModalTicket.code },
+                            { label: "Lote", value: exAlunoModalTicket.type },
+                            {
+                              label: "Valor",
+                              value:
+                                exAlunoModalTicket.price != null
+                                  ? `R$ ${Number(exAlunoModalTicket.price)
+                                      .toFixed(2)
+                                      .replace(".", ",")}`
+                                  : null,
+                            },
+                            {
+                              label: "Pagamento",
+                              value: exAlunoModalTicket.pagamentoConfirmado
+                                ? `Confirmado${
+                                    exAlunoModalTicket.metodoPagamento
+                                      ? " · " + exAlunoModalTicket.metodoPagamento
+                                      : ""
+                                  }`
+                                : "Pendente",
+                            },
+                            {
+                              label: "Emitido em",
+                              value: exAlunoModalTicket.criadoEm
+                                ? formatDate(exAlunoModalTicket.criadoEm)
+                                : null,
+                            },
+                            {
+                              label: "Entrada em",
+                              value:
+                                exAlunoModalTicket.usado &&
+                                exAlunoModalTicket.horaEntrada
+                                  ? formatDate(exAlunoModalTicket.horaEntrada)
+                                  : null,
+                            },
+                          ]
+                            .filter(({ value }) => value)
+                            .map(({ label, value }) => (
+                              <div
+                                key={label}
+                                className="flex items-center justify-between px-4 py-2.5"
+                              >
+                                <span className="text-zinc-500 text-xs font-semibold">
+                                  {label}
+                                </span>
+                                <span className="text-white text-xs font-mono">
+                                  {value}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                        <div className="flex gap-2 p-4 border-t border-zinc-800">
+                          <button
+                            onClick={handleToggleValidarExAluno}
+                            disabled={exAlunoModalLoading}
+                            className={`flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+                              exAlunoModalTicket.usado
+                                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700"
+                                : "bg-white text-black hover:bg-zinc-200"
+                            }`}
+                          >
+                            {exAlunoModalTicket.usado ? (
+                              <>Desvalidar</>
+                            ) : (
+                              <>
+                                <CheckCircle className="h-3.5 w-3.5" /> Validar
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={handleExcluirIngressoExAluno}
+                            disabled={exAlunoModalLoading}
+                            className="h-10 w-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition-all disabled:opacity-50 shrink-0"
+                            title="Excluir ingresso"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-4 space-y-4">
+                        <p className="text-zinc-500 text-xs">
+                          Este ex-aluno ainda não possui ingresso. Associe um
+                          agora:
+                        </p>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            Lote
+                          </label>
+                          <select
+                            value={associarExAlunoForm.loteId}
+                            onChange={(e) =>
+                              setAssociarExAlunoForm((p) => ({
+                                ...p,
+                                loteId: e.target.value,
+                              }))
+                            }
+                            className="flex h-11 w-full appearance-none rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm focus:outline-none focus:border-zinc-600 transition-all"
+                          >
+                            <option value="" disabled>
+                              Selecione o lote
+                            </option>
+                            {batches
+                              .filter((b) => b.exAluno)
+                              .map((b) => (
+                                <option
+                                  key={b.id}
+                                  value={b.id}
+                                  className="bg-zinc-900"
+                                >
+                                  {b.nome} — R${" "}
+                                  {Number(b.preco).toFixed(2).replace(".", ",")}
+                                </option>
+                              ))}
+                          </select>
+                          {batches.filter((b) => b.exAluno).length === 0 && (
+                            <p className="text-[11px] text-yellow-400/80">
+                              Nenhum lote de ex-aluno criado. Crie um lote
+                              marcado como "Ex-Alunos" em Gestão de Lotes.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                            E-mail (opcional)
+                          </label>
+                          <input
+                            type="email"
+                            placeholder="email@exemplo.com"
+                            value={associarExAlunoForm.email}
+                            onChange={(e) =>
+                              setAssociarExAlunoForm((p) => ({
+                                ...p,
+                                email: e.target.value,
+                              }))
+                            }
+                            className="flex h-11 w-full rounded-xl border border-zinc-800 bg-black text-white px-4 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-all"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Status
+                            </label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {(["pendente", "validado"] as const).map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarExAlunoForm((p) => ({
+                                      ...p,
+                                      status: s,
+                                    }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all capitalize ${
+                                    associarExAlunoForm.status === s
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 block">
+                              Pagamento
+                            </label>
+                            <div className="flex rounded-xl border border-zinc-800 overflow-hidden">
+                              {([false, true] as const).map((v) => (
+                                <button
+                                  key={String(v)}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssociarExAlunoForm((p) => ({
+                                      ...p,
+                                      pago: v,
+                                    }))
+                                  }
+                                  className={`flex-1 py-2.5 text-[11px] font-bold transition-all ${
+                                    associarExAlunoForm.pago === v
+                                      ? "bg-white text-black"
+                                      : "bg-black text-zinc-500 hover:text-white"
+                                  }`}
+                                >
+                                  {v ? "Pago" : "Pendente"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            fetchBatches();
+                            handleAssociarIngressoExAluno();
+                          }}
+                          disabled={
+                            !associarExAlunoForm.loteId || associarExAlunoLoading
+                          }
+                          className="w-full h-11 rounded-xl bg-white text-black text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all disabled:opacity-50"
+                        >
+                          {associarExAlunoLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <LuTicketPlus className="h-4 w-4" />
+                          )}
+                          Associar Ingresso
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
