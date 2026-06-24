@@ -541,6 +541,12 @@ function CadastroAppInner({ onBack = () => {} }) {
   // Estados dos Lotes Visíveis
   const [batches, setBatches] = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  // true quando o CPF do usuário logado está cadastrado como ex-aluno
+  const [isExAlunoUser, setIsExAlunoUser] = useState(false);
+  const isExAlunoUserRef = useRef(false);
+  useEffect(() => {
+    isExAlunoUserRef.current = isExAlunoUser;
+  }, [isExAlunoUser]);
 
   // Carrinho refatorado para suportar Lotes por ID
   // Formato: { [batchId]: { qty: number, nome: string, preco: number } }
@@ -710,11 +716,40 @@ function CadastroAppInner({ onBack = () => {} }) {
       // true = aluno cadastrado com ano/turma, false = pai/responsável
       const isAluno = !!turmaDoUsuario;
 
+      // Verifica se o usuário logado é ex-aluno (CPF na coleção "exalunos").
+      // Lotes marcados como exAluno só aparecem para esses CPFs.
+      const cpfUser = (currentUser?.cpf || "").replace(/\D/g, "");
+      let isEx = false;
+      if (cpfUser) {
+        try {
+          const exSnap = await getDocs(
+            query(
+              collection(db, "exalunos"),
+              where("cpf", "==", cpfUser),
+              limit(1)
+            )
+          );
+          isEx = !exSnap.empty;
+        } catch (e) {
+          console.warn("Erro ao verificar ex-aluno:", e);
+        }
+      }
+      setIsExAlunoUser(isEx);
+
       snap.forEach((docSnap) => {
         const data = docSnap.data();
 
         // 1) Só exibe lotes marcados como visíveis
         if (!data.visivel) return;
+
+        // Lote exclusivo de ex-alunos: só para quem está cadastrado como tal.
+        if (data.exAluno) {
+          if (!isEx) return;
+          // Ex-aluno não tem turma — ignora os filtros de público/turma abaixo
+          const vendidosEx = Number(data.ingressosAssociados) || 0;
+          list.push({ id: docSnap.id, ...data, vendidos: vendidosEx });
+          return;
+        }
 
         const publico = data.publico || "Ambos";
         if (publico === "Alunos" && !isAluno) return;
@@ -875,6 +910,27 @@ const checkCpfInResponsaveis = async (
   }
 };
 
+// Verifica se o CPF foi cadastrado pelo admin como ex-aluno
+const checkCpfInExAlunos = async (
+  cpf: string
+): Promise<{ nome: string } | null> => {
+  const cpfDigits = cpf.replace(/\D/g, "");
+  try {
+    const q = query(
+      collection(db, "exalunos"),
+      where("cpf", "==", cpfDigits),
+      limit(1)
+    );
+    const snap = await withTimeout(getDocs(q));
+    if (snap.empty) return null;
+    const data = snap.docs[0].data();
+    return { nome: data.nome || "" };
+  } catch (err) {
+    console.warn("Falha ao verificar CPF em ex-alunos:", err);
+    throw err;
+  }
+};
+
   // Espera o Firebase Auth terminar a verificação inicial de sessão
   // (no máximo timeoutMs) antes de liberar a 1ª busca de CPF. É a "leve
   // espera" que evita a busca saltar na frente do auth.
@@ -937,6 +993,24 @@ const checkCpfInResponsaveis = async (
             turma: "",
             nomeAluno: "",
             nomeResponsavel: foundPai.nome,
+          }));
+          return;
+        }
+        // Não é aluno nem responsável — verifica se é ex-aluno cadastrado.
+        // Ex-aluno entra pelo mesmo fluxo de "responsável" (CPF livre, sem
+        // turma), mas marcado com relacao "ex_aluno".
+        const foundEx = await checkCpfInExAlunos(cpf);
+        if (mySeq !== cpfSeqRef.current) return; // resposta desatualizada
+        if (foundEx) {
+          setCpfPaiData({ nome: foundEx.nome, relacao: "ex_aluno" });
+          setCpfLookupStatus("pai_found");
+          setCpfStudentData(null);
+          setFormData((prev) => ({
+            ...prev,
+            ano: "",
+            turma: "",
+            nomeAluno: "",
+            nomeResponsavel: foundEx.nome,
           }));
           return;
         }
@@ -1254,13 +1328,14 @@ const checkCpfInResponsaveis = async (
       );
       const user = userCredential.user;
 
+      const ehExAluno = cpfPaiData?.relacao === "ex_aluno";
       const userData = {
         nomeResponsavel: cpfPaiData?.nome || formData.nomeResponsavel,
         cpf: formData.cpf,
         telefone: formData.telefone,
         email: formData.email,
         criadoEm: new Date().toISOString(),
-        tipo: "pai",
+        tipo: ehExAluno ? "ex_aluno" : "pai",
         relacao: cpfPaiData?.relacao || "responsavel",
         // ano e turma intencionalmente ausentes → sistema identifica como pai
       };
@@ -1751,7 +1826,11 @@ const checkCpfInResponsaveis = async (
         isTest: !!paymentData?.isTest,
         pagamentoConfirmado: estaPago,
         dataPagamento: estaPago ? new Date().toISOString() : null,
-        ...(currentUser.tipo === "pai" ? { tipoTitular: "responsavel" } : {}),
+        ...(isExAlunoUserRef.current
+          ? { tipoTitular: "ex_aluno" }
+          : currentUser.tipo === "pai"
+          ? { tipoTitular: "responsavel" }
+          : {}),
       });
 
       // 🔒 Pagamentos de teste não têm mpPaymentId real e nunca passam pelo
