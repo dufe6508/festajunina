@@ -2635,8 +2635,53 @@ const checkCpfInExAlunos = async (
                   </>
                 )}
 
+                {/* ── ETAPA 2 (PAI/RESPONSÁVEL): exibida após CPF de responsável encontrado ── */}
+                {cpfLookupStatus === "pai_found" && cpfPaiData && (
+                  <>
+                    {/* Card pai identificado */}
+                    <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 px-5 py-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                        <User className="h-5 w-5 text-blue-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold text-sm truncate">{cpfPaiData.nome}</p>
+                        <p className="text-zinc-400 text-xs mt-0.5 capitalize">
+                          {cpfPaiData.relacao}
+                          {cpfPaiData.alunoNome && ` · Pai de ${cpfPaiData.alunoNome}`}
+                        </p>
+                      </div>
+                      <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                        <CheckCircle2 className="h-3 w-3" /> Pai/Responsável
+                      </span>
+                    </div>
+
+                    {/* Só telefone — e-mail e senha já vêm do login Google */}
+                    <div className="space-y-2">
+                      <Label>Telefone (WhatsApp)</Label>
+                      <Input
+                        name="telefone"
+                        maxLength={15}
+                        value={formData.telefone || ""}
+                        onChange={handleChange}
+                        error={errors.telefone}
+                        placeholder="(00) 00000-0000"
+                      />
+                      {errors.telefone && <p className="text-xs text-red-400">{errors.telefone}</p>}
+                    </div>
+
+                    <div className="pt-2">
+                      <Button type="submit" className="w-full mt-2 h-12" isLoading={isLoading}>
+                        Salvar e Continuar
+                      </Button>
+                      <Button type="button" variant="ghost" className="w-full mt-2" onClick={confirmLogout}>
+                        Cancelar e sair
+                      </Button>
+                    </div>
+                  </>
+                )}
+
                 {/* Botão cancelar visível enquanto aguarda CPF */}
-                {cpfLookupStatus !== "found" && (
+                {cpfLookupStatus !== "found" && cpfLookupStatus !== "pai_found" && (
                   <Button type="button" variant="ghost" className="w-full" onClick={confirmLogout}>
                     Cancelar e sair
                   </Button>
