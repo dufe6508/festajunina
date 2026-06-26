@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import CadastroApp from "./cadastro";
 import "./styles.css";
 
-// Mesma chave usada em cadastro.tsx para marcar uma sessão ativa
+// Mesma chave usada em cadastro.tsx para marcar uma sssão ativa
 const SESSION_KEY = "fj_session";
 
 export default function App() {
