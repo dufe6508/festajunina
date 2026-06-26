@@ -863,6 +863,8 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
             const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
             return key.length > 1 && b.turmasVisiveis.includes(key);
           }
+          // Fallback: responsáveis sem loteId válido → lote de Pais/Responsáveis
+          if (t.tipoTitular === "responsavel" && b.publico === "Pais/Responsáveis") return true;
           return false;
         };
 
@@ -5779,6 +5781,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                       const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
                       return key.length > 1 && b.turmasVisiveis.includes(key);
                     }
+                    if (t.tipoTitular === "responsavel" && b.publico === "Pais/Responsáveis") return true;
                     return false;
                   })
                 );
