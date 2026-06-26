@@ -308,6 +308,35 @@ class AdminErrorBoundary extends React.Component {
   }
 }
 
+// Maps a ticket to its best-matching lote ID. Each ticket maps to exactly one lote
+// to prevent double-counting. Priority: loteId match > name match > turma match
+// (alunos sem tipoTitular only) > tipoTitular fallback (responsavel/ex_aluno).
+const findBestLoteId = (t: any, batchList: any[]): string | null => {
+  if (t.loteId && batchList.some((b) => b.id === t.loteId)) return t.loteId;
+  if (t.type) {
+    const byName = batchList.find((b) => b.nome === t.type);
+    if (byName) return byName.id;
+  }
+  if (!t.tipoTitular) {
+    const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
+    if (key.length > 1) {
+      const byTurma = batchList.find((b) => b.turmasVisiveis && b.turmasVisiveis.includes(key));
+      if (byTurma) return byTurma.id;
+    }
+  }
+  if (t.tipoTitular === "responsavel") {
+    const lote = batchList.find((b) => b.publico === "Pais/Responsáveis");
+    if (lote) return lote.id;
+  }
+  if (t.tipoTitular === "ex_aluno") {
+    const lote =
+      batchList.find((b) => b.publico === "Ex-alunos") ||
+      batchList.find((b) => b.publico === "Ambos");
+    if (lote) return lote.id;
+  }
+  return null;
+};
+
 function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   const [activeTab, setActiveTab] = useState("admin_scanner");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -856,20 +885,8 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         const allT: any[] = [];
         ticketsSnap.forEach((d) => allT.push({ id: d.id, ...d.data() }));
 
-        // Helper: verifica se um ingresso pertence a um lote
-        const ticketPertenceAoLote = (t: any, b: any): boolean => {
-          if (b.id === t.loteId || b.nome === t.type) return true;
-          if (b.turmasVisiveis && b.turmasVisiveis.length > 0) {
-            const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
-            return key.length > 1 && b.turmasVisiveis.includes(key);
-          }
-          // Fallback: responsáveis sem loteId válido → lote de Pais/Responsáveis
-          if (t.tipoTitular === "responsavel" && b.publico === "Pais/Responsáveis") return true;
-          return false;
-        };
-
         const synced = sorted.map((b) => {
-          const count = allT.filter((t) => ticketPertenceAoLote(t, b)).length;
+          const count = allT.filter((t) => findBestLoteId(t, sorted) === b.id).length;
           // Corrige sempre que o contador divergir da contagem real (inclusão OU exclusão)
           if (b.ingressosAssociados == null || b.ingressosAssociados !== count) {
             updateDoc(doc(db, "lotes", b.id), { ingressosAssociados: count }).catch(() => {});
@@ -5551,14 +5568,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
-                    const pertenceAoLote = (t: any) => {
-                      if (t.loteId === batch.id || t.type === batch.nome) return true;
-                      if (batch.turmasVisiveis && batch.turmasVisiveis.length > 0) {
-                        const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
-                        return key.length > 1 && batch.turmasVisiveis.includes(key);
-                      }
-                      return false;
-                    };
+                    const pertenceAoLote = (t: any) => findBestLoteId(t, batches) === batch.id;
                     const vendidos = (allTickets || []).filter(
                       (t) => t.pagamentoConfirmado && pertenceAoLote(t)
                     ).length;
@@ -5774,17 +5784,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
 
               {/* Aviso de ingressos sem lote correspondente (não contabilizados em nenhum card acima) */}
               {!loadingBatches && (() => {
-                const orfaos = (allTickets || []).filter((t) =>
-                  !batches.some((b) => {
-                    if (b.id === t.loteId || b.nome === t.type) return true;
-                    if (b.turmasVisiveis && b.turmasVisiveis.length > 0) {
-                      const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
-                      return key.length > 1 && b.turmasVisiveis.includes(key);
-                    }
-                    if (t.tipoTitular === "responsavel" && b.publico === "Pais/Responsáveis") return true;
-                    return false;
-                  })
-                );
+                const orfaos = (allTickets || []).filter((t) => findBestLoteId(t, batches) === null);
                 if (orfaos.length === 0) return null;
                 return (
                   <div className="flex items-start gap-3 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl px-5 py-4">
