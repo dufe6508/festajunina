@@ -54,6 +54,9 @@ import { AiOutlineEyeInvisible } from "react-icons/ai";
 import { MdGroups } from "react-icons/md";
 import { LuTicketPlus, LuTicketCheck } from "react-icons/lu";
 import { findBestLoteId, resolveLoteId } from "./loteMatching";
+import RifasModule from "./RifasModule";
+import { fetchAllBooks } from "./rifasService";
+import { rifaRevenue as computeRifaRevenue } from "./rifas";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -390,6 +393,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [generatedTicket, setGeneratedTicket] = useState(null);
   const [revenueModalOpen, setRevenueModalOpen] = useState(false); // modal de receita detalhada
+  const [rifaFin, setRifaFin] = useState({ arrecadado: 0, previsto: 0, pendentes: 0 }); // receita de rifas (financeiro integrado)
   const [presencaListModal, setPresencaListModal] = useState<null | "todos" | "entraram" | "pendentes">(null); // modal lista de ingressos na tela de presença
 
   // Estados: Importação de Alunos
@@ -689,6 +693,19 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
     };
     inicializarFirebase();
   }, []);
+
+  // ─── Receita de RIFAS para o financeiro integrado (ingressos + rifas) ───
+  const fetchRifaRevenue = async () => {
+    try {
+      const books = await fetchAllBooks();
+      setRifaFin(computeRifaRevenue(books));
+    } catch {
+      /* coleção pode não existir ainda — ignora */
+    }
+  };
+  useEffect(() => {
+    fetchRifaRevenue();
+  }, [activeTab]);
 
   useEffect(() => {
     if (!addTicketStudentSearchOpen) return;
@@ -3966,6 +3983,11 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
               label: "Gestão de Lotes",
               icon: IoMdAddCircleOutline,
             },
+            {
+              key: "admin_rifas",
+              label: "Rifas",
+              icon: Ticket,
+            },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -4124,6 +4146,8 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 ? "Pesquisar Ingressos"
                 : activeTab === "admin_batches"
                 ? "Gestão de Lotes"
+                : activeTab === "admin_rifas"
+                ? "Rifas"
                 : activeTab === "admin_groups"
                 ? "Alunos"
                 : activeTab === "admin_notifications"
@@ -4516,6 +4540,49 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                   onClick={() => setRevenueModalOpen(true)}
                 />
               </div>
+
+              {/* ── RECEITA CONSOLIDADA: Ingressos + Rifas ── */}
+              {(() => {
+                const TAXA_PIX = 0.0099;
+                const TAXA_CARTAO = 0.0498;
+                const ingressos = allTickets
+                  .filter((t) => t.pagamentoConfirmado)
+                  .reduce((acc, t) => {
+                    const bruto = t.price || 0;
+                    if (t.metodoPagamento === "cartao") return acc + bruto * (1 - TAXA_CARTAO);
+                    if (t.metodoPagamento === "dinheiro") return acc + bruto;
+                    return acc + bruto * (1 - TAXA_PIX);
+                  }, 0);
+                const rifas = rifaFin.arrecadado || 0;
+                const total = ingressos + rifas;
+                const fmt = (n) => `R$ ${n.toFixed(2).replace(".", ",")}`;
+                return (
+                  <div className="mt-3 rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5">
+                    <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+                      Receita Total (Ingressos + Rifas)
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                        <p className="text-xs text-zinc-500">Ingressos</p>
+                        <p className="mt-1 text-lg font-black tabular-nums text-white">{fmt(ingressos)}</p>
+                      </div>
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                        <p className="text-xs text-zinc-500">Rifas</p>
+                        <p className="mt-1 text-lg font-black tabular-nums text-white">{fmt(rifas)}</p>
+                        {rifaFin.pendentes > 0 && (
+                          <p className="mt-0.5 text-[11px] text-amber-400">
+                            {rifaFin.pendentes} rifa(s) c/ pgto pendente
+                          </p>
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-white/20 bg-white/[0.04] p-4">
+                        <p className="text-xs text-zinc-400">Total</p>
+                        <p className="mt-1 text-lg font-black tabular-nums text-white">{fmt(total)}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -5816,6 +5883,12 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                   </div>
                 );
               })()}
+            </div>
+          )}
+          {/* ── RIFAS ── */}
+          {activeTab === "admin_rifas" && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <RifasModule showToast={showToast} />
             </div>
           )}
           {/* ── ALUNOS (sub-abas) ── */}
