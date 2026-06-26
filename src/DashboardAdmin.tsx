@@ -821,18 +821,25 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
     return Number(lote?.preco) || 0;
   };
 
-  // Receita LÍQUIDA de ingressos (desconta taxa do meio de pagamento).
+  // Apenas ingressos PAGOS (ignora os com status não pago).
+  const ingressosPagos = () => allTickets.filter((t) => t.pagamentoConfirmado);
+
+  // Receita BRUTA de ingressos = soma do valor cobrado dos ingressos pagos
+  // (o "dinheiro" de fato arrecadado, sem descontar taxas).
+  const receitaBrutaIngressos = () =>
+    ingressosPagos().reduce((acc, t) => acc + precoBrutoIngresso(t), 0);
+
+  // Receita LÍQUIDA de ingressos (desconta taxa do meio de pagamento) — usada
+  // no detalhamento por método.
   const receitaLiquidaIngressos = () => {
     const TAXA_PIX = 0.0099;
     const TAXA_CARTAO = 0.0498;
-    return allTickets
-      .filter((t) => t.pagamentoConfirmado)
-      .reduce((acc, t) => {
-        const bruto = precoBrutoIngresso(t);
-        if (t.metodoPagamento === "cartao") return acc + bruto * (1 - TAXA_CARTAO);
-        if (t.metodoPagamento === "dinheiro") return acc + bruto;
-        return acc + bruto * (1 - TAXA_PIX); // pix ou sem método = pix
-      }, 0);
+    return ingressosPagos().reduce((acc, t) => {
+      const bruto = precoBrutoIngresso(t);
+      if (t.metodoPagamento === "cartao") return acc + bruto * (1 - TAXA_CARTAO);
+      if (t.metodoPagamento === "dinheiro") return acc + bruto;
+      return acc + bruto * (1 - TAXA_PIX); // pix ou sem método = pix
+    }, 0);
   };
 
   const unreadLoginCount = loginNotifs.filter((n) => isUnread(n.criadoEm)).length;
@@ -4556,18 +4563,18 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 <StatCard
                   title="Receita (R$)"
                   val={(() => {
-                    const liquido = receitaLiquidaIngressos();
-                    return `R$ ${liquido.toFixed(2).replace(".", ",")}`;
+                    const bruto = receitaBrutaIngressos();
+                    return `R$ ${bruto.toFixed(2).replace(".", ",")}`;
                   })()}
                   icon={Banknote}
-                  sub="Valor Líquido Arrecadado"
+                  sub="Total arrecadado (toque p/ taxas)"
                   onClick={() => setRevenueModalOpen(true)}
                 />
               </div>
 
               {/* ── RECEITA CONSOLIDADA: Ingressos + Rifas ── */}
               {(() => {
-                const ingressos = receitaLiquidaIngressos();
+                const ingressos = receitaBrutaIngressos();
                 const rifas = rifaFin.arrecadado || 0;
                 const total = ingressos + rifas;
                 const fmt = (n) => `R$ ${n.toFixed(2).replace(".", ",")}`;
