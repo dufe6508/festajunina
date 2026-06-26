@@ -43,6 +43,7 @@ import {
   Unlock,
   Bell,
   LogIn,
+  Dices,
 } from "lucide-react";
 import { FaRegAddressCard } from "react-icons/fa";
 import {
@@ -806,6 +807,32 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   const getLoteName = (t) => {
     const lote = batches.find((b) => b.id === t.loteId);
     return lote?.nome || t.type || "—";
+  };
+
+  // Preço BRUTO de um ingresso. Alguns ingressos pagos foram salvos sem "price"
+  // (ex: criação manual sem lote, dados antigos) → contavam em "Vendidos" mas
+  // somavam R$0 na receita ("dinheiro sumindo"). Aqui, quando price está
+  // ausente/zero, recuperamos o preço pelo lote do ingresso.
+  const precoBrutoIngresso = (t) => {
+    const p = Number(t.price) || 0;
+    if (p > 0) return p;
+    const loteId = resolveLoteId(t, batches);
+    const lote = batches.find((b) => b.id === loteId);
+    return Number(lote?.preco) || 0;
+  };
+
+  // Receita LÍQUIDA de ingressos (desconta taxa do meio de pagamento).
+  const receitaLiquidaIngressos = () => {
+    const TAXA_PIX = 0.0099;
+    const TAXA_CARTAO = 0.0498;
+    return allTickets
+      .filter((t) => t.pagamentoConfirmado)
+      .reduce((acc, t) => {
+        const bruto = precoBrutoIngresso(t);
+        if (t.metodoPagamento === "cartao") return acc + bruto * (1 - TAXA_CARTAO);
+        if (t.metodoPagamento === "dinheiro") return acc + bruto;
+        return acc + bruto * (1 - TAXA_PIX); // pix ou sem método = pix
+      }, 0);
   };
 
   const unreadLoginCount = loginNotifs.filter((n) => isUnread(n.criadoEm)).length;
@@ -3994,7 +4021,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
             {
               key: "admin_rifas",
               label: "Rifas",
-              icon: Ticket,
+              icon: Dices,
             },
           ].map(({ key, label, icon: Icon }) => (
             <button
@@ -4529,18 +4556,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 <StatCard
                   title="Receita (R$)"
                   val={(() => {
-                    const pagos = allTickets.filter(
-                      (t) => t.pagamentoConfirmado
-                    );
-                    const TAXA_PIX = 0.0099;
-                    const TAXA_CARTAO = 0.0498;
-                    const liquido = pagos.reduce((acc, t) => {
-                      const bruto = t.price || 0;
-                      if (t.metodoPagamento === "cartao")
-                        return acc + bruto * (1 - TAXA_CARTAO);
-                      if (t.metodoPagamento === "dinheiro") return acc + bruto;
-                      return acc + bruto * (1 - TAXA_PIX); // pix ou sem método = pix
-                    }, 0);
+                    const liquido = receitaLiquidaIngressos();
                     return `R$ ${liquido.toFixed(2).replace(".", ",")}`;
                   })()}
                   icon={Banknote}
@@ -4551,16 +4567,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
 
               {/* ── RECEITA CONSOLIDADA: Ingressos + Rifas ── */}
               {(() => {
-                const TAXA_PIX = 0.0099;
-                const TAXA_CARTAO = 0.0498;
-                const ingressos = allTickets
-                  .filter((t) => t.pagamentoConfirmado)
-                  .reduce((acc, t) => {
-                    const bruto = t.price || 0;
-                    if (t.metodoPagamento === "cartao") return acc + bruto * (1 - TAXA_CARTAO);
-                    if (t.metodoPagamento === "dinheiro") return acc + bruto;
-                    return acc + bruto * (1 - TAXA_PIX);
-                  }, 0);
+                const ingressos = receitaLiquidaIngressos();
                 const rifas = rifaFin.arrecadado || 0;
                 const total = ingressos + rifas;
                 const fmt = (n) => `R$ ${n.toFixed(2).replace(".", ",")}`;
@@ -11516,7 +11523,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
           );
 
           const somarBruto = (arr) =>
-            arr.reduce((s, t) => s + (t.price || 0), 0);
+            arr.reduce((s, t) => s + precoBrutoIngresso(t), 0);
 
           const TAXA_PIX = 0.0099;
           const TAXA_CARTAO = 0.0498;

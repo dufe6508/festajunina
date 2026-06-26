@@ -199,6 +199,18 @@ export const sellAllInBook = (
   return recomputeBook({ ...book, tickets });
 };
 
+// ── Reseta um bloquinho: libera TODAS as rifas (volta a disponível) ──
+export const releaseAllInBook = (book: RaffleBook): RaffleBook => {
+  const tickets = book.tickets.map((t) => ({
+    ...t,
+    status: "available" as TicketStatus,
+    paymentStatus: "none" as PaymentStatus,
+    soldTo: null,
+    soldAt: null,
+  }));
+  return recomputeBook({ ...book, tickets });
+};
+
 // ── Exporta rifas para CSV (uma linha por rifa) ──
 export const booksToCSV = (books: RaffleBook[]): string => {
   const head = ["Ano", "Turma", "Bloco", "Rifa", "Status", "Preco", "VendidaPara", "VendidaEm"];

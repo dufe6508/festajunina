@@ -18,6 +18,7 @@ import {
   sellTicket,
   releaseTicket,
   sellAllInBook,
+  releaseAllInBook,
 } from "./rifas";
 
 const COL = "rifas_books";
@@ -128,6 +129,22 @@ export const sellAllBooksRemote = async (
 ): Promise<RaffleBook[]> => {
   const batch = writeBatch(db);
   const updated = books.map((b) => sellAllInBook(b, opts));
+  for (const b of updated) batch.set(doc(db, COL, b.id), b);
+  await batch.commit();
+  return updated;
+};
+
+// Reseta um BLOQUINHO inteiro (libera todas as rifas) e persiste.
+export const resetBookRemote = async (book: RaffleBook): Promise<RaffleBook> => {
+  const updated = releaseAllInBook(book);
+  await saveBook(updated);
+  return updated;
+};
+
+// Reseta TODOS os bloquinhos de uma turma (batch). Retorna os atualizados.
+export const resetAllBooksRemote = async (books: RaffleBook[]): Promise<RaffleBook[]> => {
+  const batch = writeBatch(db);
+  const updated = books.map((b) => releaseAllInBook(b));
   for (const b of updated) batch.set(doc(db, COL, b.id), b);
   await batch.commit();
   return updated;

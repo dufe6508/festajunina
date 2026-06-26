@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Loader2,
   Ticket,
+  Dices,
   ChevronDown,
   ChevronRight,
   Trophy,
@@ -17,6 +18,7 @@ import {
   Plus,
   Download,
   Zap,
+  RotateCcw,
 } from "lucide-react";
 import {
   TICKET_PRICE,
@@ -37,6 +39,8 @@ import {
   releaseTicketRemote,
   sellBookRemote,
   sellAllBooksRemote,
+  resetBookRemote,
+  resetAllBooksRemote,
 } from "./rifasService";
 
 const brl = (n) => `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
@@ -192,6 +196,32 @@ export default function RifasModule({ showToast = () => {} }) {
     }
     setBusy(null);
   };
+  const handleResetBook = async (book) => {
+    if (book.soldTickets === 0) return showToast("Bloco já está zerado.");
+    if (!window.confirm(`Resetar o Bloco ${book.bookNumber}? As ${book.soldTickets} rifa(s) vendida(s) voltam a disponível.`)) return;
+    setBusy(book.id);
+    try {
+      applyBook(await resetBookRemote(book));
+      showToast(`Bloco ${book.bookNumber} resetado.`, "success");
+    } catch {
+      showToast("Erro ao resetar bloco.");
+    }
+    setBusy(null);
+  };
+  const handleResetTurma = async (classId) => {
+    const cb = grouped[classId] || [];
+    const vendidas = cb.reduce((s, b) => s + b.soldTickets, 0);
+    if (vendidas === 0) return showToast("Turma já está zerada.");
+    if (!window.confirm(`Resetar a turma ${classId}? Todas as ${vendidas} rifa(s) vendida(s) voltam a disponível.`)) return;
+    setBusy(classId);
+    try {
+      applyBooks(await resetAllBooksRemote(cb));
+      showToast(`Turma ${classId} resetada.`, "success");
+    } catch {
+      showToast("Erro ao resetar turma.");
+    }
+    setBusy(null);
+  };
 
   const handleExportCSV = () => {
     try {
@@ -242,6 +272,16 @@ export default function RifasModule({ showToast = () => {} }) {
               Vender bloco
             </button>
           )}
+          {b.soldTickets > 0 && (
+            <button
+              onClick={() => handleResetBook(b)}
+              disabled={busy === b.id}
+              className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-[10px] font-bold text-zinc-400 hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+              title="Resetar o bloco (libera todas as rifas)"
+            >
+              <RotateCcw className="h-3 w-3" /> Resetar
+            </button>
+          )}
         </div>
         {bookOpen && (
           <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-3 sm:grid-cols-5">
@@ -278,7 +318,7 @@ export default function RifasModule({ showToast = () => {} }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
-            <Ticket className="h-6 w-6" /> Rifas
+            <Dices className="h-6 w-6" /> Rifas
           </h1>
           <p className="text-sm text-zinc-500">
             10 bloquinhos × 10 rifas por turma · {brl(TICKET_PRICE)} cada
@@ -458,6 +498,16 @@ export default function RifasModule({ showToast = () => {} }) {
                                       <Zap className="h-3 w-3" />
                                     )}
                                     Vender tudo
+                                  </button>
+                                )}
+                                {f.soldTickets > 0 && (
+                                  <button
+                                    onClick={() => handleResetTurma(f.classId)}
+                                    disabled={busy === f.classId}
+                                    className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[10px] font-bold text-zinc-400 hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+                                    title="Resetar todas as rifas da turma"
+                                  >
+                                    <RotateCcw className="h-3 w-3" /> Resetar
                                   </button>
                                 )}
                               </div>

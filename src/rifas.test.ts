@@ -10,6 +10,7 @@ import {
   sellTicket,
   releaseTicket,
   sellAllInBook,
+  releaseAllInBook,
   booksToCSV,
   classFinancial,
   financialByClass,
@@ -80,6 +81,15 @@ describe("venda e estados automáticos do bloco", () => {
     b = releaseTicket(b, 5);
     expect(b.soldTickets).toBe(0);
     expect(b.status).toBe("available");
+  });
+
+  test("resetar bloco inteiro → todas disponíveis", () => {
+    let b = sellAllInBook(book, { paymentStatus: "paid" });
+    expect(b.soldTickets).toBe(10);
+    b = releaseAllInBook(b);
+    expect(b.soldTickets).toBe(0);
+    expect(b.status).toBe("available");
+    expect(b.tickets.every((t) => t.status === "available" && t.soldTo === null)).toBe(true);
   });
 
   test("não revende rifa já vendida (idempotente)", () => {
