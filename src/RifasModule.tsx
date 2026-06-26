@@ -15,6 +15,8 @@ import {
   RefreshCw,
   CheckCircle2,
   Plus,
+  Download,
+  Zap,
 } from "lucide-react";
 import {
   TICKET_PRICE,
@@ -25,6 +27,7 @@ import {
   rankingBySold,
   rankingByRevenue,
   recomputeBook,
+  booksToCSV,
 } from "./rifas";
 import {
   fetchTurmas,
@@ -32,6 +35,8 @@ import {
   ensureAllClassBooks,
   sellTicketRemote,
   releaseTicketRemote,
+  sellBookRemote,
+  sellAllBooksRemote,
 } from "./rifasService";
 
 const brl = (n) => `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
@@ -80,7 +85,9 @@ export default function RifasModule({ showToast = () => {} }) {
   const [turmas, setTurmas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [busy, setBusy] = useState(null); // id de operação em andamento
   const [sub, setSub] = useState("overview"); // overview | turmas | relatorios
+  const [openYear, setOpenYear] = useState(null);
   const [openClass, setOpenClass] = useState(null);
   const [openBook, setOpenBook] = useState(null);
 
@@ -107,13 +114,20 @@ export default function RifasModule({ showToast = () => {} }) {
   const rankSold = useMemo(() => rankingBySold(porTurma), [porTurma]);
   const rankRev = useMemo(() => rankingByRevenue(porTurma), [porTurma]);
 
-  // turmas que ainda não têm os 10 bloquinhos
-  const turmasFaltando = useMemo(() => {
-    return turmas.filter((t) => {
-      const have = (grouped[t.classId] || []).length;
-      return have < 10;
+  // Turmas agrupadas por ANO (1, 2, 3...) para a aba "Por Turma".
+  const turmasByYear = useMemo(() => {
+    const m = {};
+    porTurma.forEach((f) => {
+      (m[f.yearId] ||= []).push(f);
     });
-  }, [turmas, grouped]);
+    return m;
+  }, [porTurma]);
+  const anos = useMemo(() => Object.keys(turmasByYear).sort(), [turmasByYear]);
+
+  const turmasFaltando = useMemo(
+    () => turmas.filter((t) => (grouped[t.classId] || []).length < 10),
+    [turmas, grouped]
+  );
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -121,9 +135,7 @@ export default function RifasModule({ showToast = () => {} }) {
       const criados = await ensureAllClassBooks(turmas, books);
       await reload();
       showToast(
-        criados > 0
-          ? `${criados} bloquinho(s) criado(s).`
-          : "Todas as turmas já têm seus bloquinhos.",
+        criados > 0 ? `${criados} bloquinho(s) criado(s).` : "Todas as turmas já têm seus bloquinhos.",
         "success"
       );
     } catch (e) {
@@ -134,21 +146,65 @@ export default function RifasModule({ showToast = () => {} }) {
 
   const applyBook = (updated) =>
     setBooks((prev) => prev.map((b) => (b.id === updated.id ? recomputeBook(updated) : b)));
+  const applyBooks = (updatedList) =>
+    setBooks((prev) =>
+      prev.map((b) => {
+        const u = updatedList.find((x) => x.id === b.id);
+        return u ? recomputeBook(u) : b;
+      })
+    );
 
   const handleSell = async (book, n) => {
     try {
-      const upd = await sellTicketRemote(book, n, { paymentStatus: "paid" });
-      applyBook(upd);
-    } catch (e) {
+      applyBook(await sellTicketRemote(book, n, { paymentStatus: "paid" }));
+    } catch {
       showToast("Erro ao vender rifa.");
     }
   };
   const handleRelease = async (book, n) => {
     try {
-      const upd = await releaseTicketRemote(book, n);
-      applyBook(upd);
-    } catch (e) {
+      applyBook(await releaseTicketRemote(book, n));
+    } catch {
       showToast("Erro ao liberar rifa.");
+    }
+  };
+  const handleSellBook = async (book) => {
+    setBusy(book.id);
+    try {
+      applyBook(await sellBookRemote(book, { paymentStatus: "paid" }));
+      showToast(`Bloco ${book.bookNumber} vendido por completo.`, "success");
+    } catch {
+      showToast("Erro ao vender bloco.");
+    }
+    setBusy(null);
+  };
+  const handleSellTurma = async (classId) => {
+    const cb = grouped[classId] || [];
+    const restantes = cb.reduce((s, b) => s + b.availableTickets, 0);
+    if (restantes === 0) return showToast("Turma já está com todas as rifas vendidas.");
+    if (!window.confirm(`Vender TODAS as ${restantes} rifas restantes da turma ${classId}?`)) return;
+    setBusy(classId);
+    try {
+      applyBooks(await sellAllBooksRemote(cb, { paymentStatus: "paid" }));
+      showToast(`Turma ${classId}: ${restantes} rifa(s) vendida(s).`, "success");
+    } catch {
+      showToast("Erro ao vender turma.");
+    }
+    setBusy(null);
+  };
+
+  const handleExportCSV = () => {
+    try {
+      const csv = booksToCSV(books);
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rifas_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast("Erro ao exportar CSV.");
     }
   };
 
@@ -159,6 +215,62 @@ export default function RifasModule({ showToast = () => {} }) {
       </div>
     );
   }
+
+  const renderBook = (b) => {
+    const bookOpen = openBook === b.id;
+    return (
+      <div key={b.id} className="rounded-xl border border-zinc-800 bg-zinc-950">
+        <div className="flex items-center gap-2 p-3">
+          <button onClick={() => setOpenBook(bookOpen ? null : b.id)} className="flex flex-1 items-center gap-2 text-left">
+            {bookOpen ? (
+              <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+            )}
+            <span className="flex-1 text-sm font-semibold text-white">Bloco {b.bookNumber}</span>
+            <span className="text-xs tabular-nums text-zinc-500">{b.soldTickets}/10</span>
+            {statusPill(b.status)}
+          </button>
+          {b.availableTickets > 0 && (
+            <button
+              onClick={() => handleSellBook(b)}
+              disabled={busy === b.id}
+              className="flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[10px] font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+              title="Vender o bloco inteiro"
+            >
+              {busy === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+              Vender bloco
+            </button>
+          )}
+        </div>
+        {bookOpen && (
+          <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-3 sm:grid-cols-5">
+            {b.tickets.map((t) => (
+              <div key={t.number} className="flex flex-col items-center gap-1 rounded-lg border border-zinc-800 bg-[#0a0a0a] p-2">
+                <span className="text-xs font-bold text-white">Rifa {t.number}</span>
+                {statusPill(t.status)}
+                {t.status === "available" ? (
+                  <button
+                    onClick={() => handleSell(b, t.number)}
+                    className="mt-1 w-full rounded-md bg-white py-1 text-[10px] font-bold text-black hover:bg-zinc-200"
+                  >
+                    Vender
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleRelease(b, t.number)}
+                    className="mt-1 w-full rounded-md border border-zinc-700 py-1 text-[10px] font-bold text-zinc-400 hover:text-white"
+                  >
+                    Liberar
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -172,13 +284,21 @@ export default function RifasModule({ showToast = () => {} }) {
             10 bloquinhos × 10 rifas por turma · {brl(TICKET_PRICE)} cada
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={reload}
             className="flex h-10 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-xs font-semibold text-zinc-300 hover:text-white"
           >
             <RefreshCw className="h-4 w-4" /> Atualizar
           </button>
+          {books.length > 0 && (
+            <button
+              onClick={handleExportCSV}
+              className="flex h-10 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-xs font-semibold text-zinc-300 hover:text-white"
+            >
+              <Download className="h-4 w-4" /> Exportar CSV
+            </button>
+          )}
           {turmasFaltando.length > 0 && (
             <button
               onClick={handleGenerate}
@@ -186,7 +306,7 @@ export default function RifasModule({ showToast = () => {} }) {
               className="flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-xs font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
             >
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Gerar bloquinhos ({turmasFaltando.length} turma{turmasFaltando.length !== 1 ? "s" : ""})
+              Gerar bloquinhos ({turmasFaltando.length})
             </button>
           )}
         </div>
@@ -226,33 +346,24 @@ export default function RifasModule({ showToast = () => {} }) {
           {/* VISÃO GERAL */}
           {sub === "overview" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <Card title="Disponíveis" value={ov.availableTickets} icon={Ticket} />
                 <Card title="Vendidas" value={ov.soldTickets} icon={CheckCircle2} />
-                <Card title="Pendentes" value={ov.pendingTickets} sub="pgto pendente" />
-                <Card title="Arrecadado" value={brl(ov.totalRevenue)} icon={Banknote} />
-                <Card title="Previsto" value={brl(ov.expectedRevenue)} sub="potencial máximo" />
-                <Card
-                  title="% Vendido"
-                  value={`${ov.completionPercentage}%`}
-                  sub={`${ov.classesCount} turma(s)`}
-                />
+                <Card title="Arrecadado" value={brl(ov.totalRevenue)} icon={Banknote} sub="rifas vendidas" />
+                <Card title="% Vendido" value={`${ov.completionPercentage}%`} sub={`${ov.classesCount} turma(s)`} />
               </div>
               <div className="rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5">
                 <div className="mb-2 flex justify-between text-xs text-zinc-400">
                   <span>Progresso global</span>
                   <span className="tabular-nums">
-                    {ov.soldTickets}/{ov.totalTickets} · falta {brl(ov.remainingRevenue)}
+                    {ov.soldTickets}/{ov.totalTickets}
                   </span>
                 </div>
                 <Progress pct={ov.completionPercentage} esgotado={ov.completionPercentage >= 100} />
               </div>
 
-              {/* Consolidado por ano */}
               <div className="space-y-2">
-                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500">
-                  Consolidado por ano
-                </p>
+                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500">Consolidado por ano</p>
                 {porAno.map((f) => (
                   <div
                     key={f.yearId}
@@ -268,94 +379,94 @@ export default function RifasModule({ showToast = () => {} }) {
             </div>
           )}
 
-          {/* POR TURMA */}
+          {/* POR TURMA — agrupado por ANO */}
           {sub === "turmas" && (
             <div className="space-y-3">
-              {porTurma.map((f) => {
-                const classBooks = grouped[f.classId] || [];
-                const isOpen = openClass === f.classId;
+              {anos.map((ano) => {
+                const fins = turmasByYear[ano] || [];
+                const yearOpen = openYear === ano;
+                const sold = fins.reduce((s, f) => s + f.soldTickets, 0);
+                const total = fins.reduce((s, f) => s + f.totalTickets, 0);
+                const rev = fins.reduce((s, f) => s + f.totalRevenue, 0);
                 return (
-                  <div key={f.classId} className="rounded-2xl border border-zinc-800 bg-[#0a0a0a]">
+                  <div key={ano} className="rounded-2xl border border-zinc-800 bg-[#0a0a0a]">
                     <button
                       onClick={() => {
-                        setOpenClass(isOpen ? null : f.classId);
+                        setOpenYear(yearOpen ? null : ano);
+                        setOpenClass(null);
                         setOpenBook(null);
                       }}
                       className="flex w-full items-center gap-3 p-4 text-left"
                     >
-                      {isOpen ? (
-                        <ChevronDown className="h-4 w-4 text-zinc-500" />
+                      {yearOpen ? (
+                        <ChevronDown className="h-5 w-5 text-zinc-400" />
                       ) : (
-                        <ChevronRight className="h-4 w-4 text-zinc-500" />
+                        <ChevronRight className="h-5 w-5 text-zinc-400" />
                       )}
-                      <div className="flex-1">
-                        <p className="font-bold text-white">Turma {f.classId}</p>
-                        <p className="text-xs text-zinc-500">
-                          {f.booksComplete} bloco(s) completo(s) · {f.booksIncomplete} parcial(is)
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold tabular-nums text-white">
-                          {f.soldTickets}/{f.totalTickets}
-                        </p>
-                        <p className="text-xs tabular-nums text-zinc-500">{brl(f.totalRevenue)}</p>
-                      </div>
+                      <span className="flex-1 text-lg font-bold text-white">{ano}º Ano</span>
+                      <span className="text-sm tabular-nums text-zinc-400">
+                        {sold}/{total} · {brl(rev)}
+                      </span>
+                      <span className="ml-2 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-500">
+                        {fins.length} turma(s)
+                      </span>
                     </button>
-                    <div className="px-4 pb-3">
-                      <Progress pct={f.completionPercentage} esgotado={f.completionPercentage >= 100} />
-                    </div>
 
-                    {isOpen && (
-                      <div className="space-y-2 border-t border-zinc-800 p-4">
-                        {classBooks.map((b) => {
-                          const bookOpen = openBook === b.id;
+                    {yearOpen && (
+                      <div className="space-y-2 border-t border-zinc-800 p-3">
+                        {fins.map((f) => {
+                          const classBooks = grouped[f.classId] || [];
+                          const classOpen = openClass === f.classId;
                           return (
-                            <div key={b.id} className="rounded-xl border border-zinc-800 bg-zinc-950">
-                              <button
-                                onClick={() => setOpenBook(bookOpen ? null : b.id)}
-                                className="flex w-full items-center gap-2 p-3 text-left"
-                              >
-                                {bookOpen ? (
-                                  <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
-                                ) : (
-                                  <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                            <div key={f.classId} className="rounded-xl border border-zinc-800 bg-zinc-950">
+                              <div className="flex items-center gap-2 p-3">
+                                <button
+                                  onClick={() => {
+                                    setOpenClass(classOpen ? null : f.classId);
+                                    setOpenBook(null);
+                                  }}
+                                  className="flex flex-1 items-center gap-2 text-left"
+                                >
+                                  {classOpen ? (
+                                    <ChevronDown className="h-4 w-4 text-zinc-500" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 text-zinc-500" />
+                                  )}
+                                  <div className="flex-1">
+                                    <p className="font-bold text-white">Turma {f.classId}</p>
+                                    <p className="text-[11px] text-zinc-500">
+                                      {f.booksComplete} completo(s) · {f.booksIncomplete} parcial(is)
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-sm font-bold tabular-nums text-white">
+                                      {f.soldTickets}/{f.totalTickets}
+                                    </p>
+                                    <p className="text-[11px] tabular-nums text-zinc-500">{brl(f.totalRevenue)}</p>
+                                  </div>
+                                </button>
+                                {f.availableTickets > 0 && (
+                                  <button
+                                    onClick={() => handleSellTurma(f.classId)}
+                                    disabled={busy === f.classId}
+                                    className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/[0.06] px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-white/10 disabled:opacity-50"
+                                    title="Vender todas as rifas da turma"
+                                  >
+                                    {busy === f.classId ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Zap className="h-3 w-3" />
+                                    )}
+                                    Vender tudo
+                                  </button>
                                 )}
-                                <span className="flex-1 text-sm font-semibold text-white">
-                                  Bloco {b.bookNumber}
-                                </span>
-                                <span className="text-xs tabular-nums text-zinc-500">
-                                  {b.soldTickets}/10
-                                </span>
-                                {statusPill(b.status)}
-                              </button>
-                              {bookOpen && (
-                                <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-3 sm:grid-cols-5">
-                                  {b.tickets.map((t) => (
-                                    <div
-                                      key={t.number}
-                                      className="flex flex-col items-center gap-1 rounded-lg border border-zinc-800 bg-[#0a0a0a] p-2"
-                                    >
-                                      <span className="text-xs font-bold text-white">
-                                        Rifa {t.number}
-                                      </span>
-                                      {statusPill(t.status)}
-                                      {t.status === "available" ? (
-                                        <button
-                                          onClick={() => handleSell(b, t.number)}
-                                          className="mt-1 w-full rounded-md bg-white py-1 text-[10px] font-bold text-black hover:bg-zinc-200"
-                                        >
-                                          Vender
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleRelease(b, t.number)}
-                                          className="mt-1 w-full rounded-md border border-zinc-700 py-1 text-[10px] font-bold text-zinc-400 hover:text-white"
-                                        >
-                                          Liberar
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))}
+                              </div>
+                              <div className="px-3 pb-2">
+                                <Progress pct={f.completionPercentage} esgotado={f.completionPercentage >= 100} />
+                              </div>
+                              {classOpen && (
+                                <div className="space-y-2 border-t border-zinc-800 p-3">
+                                  {classBooks.map(renderBook)}
                                 </div>
                               )}
                             </div>

@@ -2,6 +2,8 @@ import {
   findBestLoteId,
   resolveLoteId,
   pickFallbackLote,
+  idealCategoryLote,
+  enrichTicket,
   reconcile,
   BatchLike,
   TicketLike,
@@ -101,6 +103,47 @@ describe("resolveLoteId — NUNCA deixa órfão quando há lote", () => {
     for (const t of tickets) {
       expect(resolveLoteId(t, batches)).not.toBeNull();
     }
+  });
+});
+
+describe("regressão pais/ex — não cair no lote de alunos", () => {
+  const bs: BatchLike[] = [
+    { id: "PADRAO", nome: "1º Lote - Padrão", publico: "Alunos", quantidade: 700 },
+    { id: "PAIS", nome: "Lote Pais", publico: "Pais/Responsáveis", quantidade: 100 },
+    { id: "EX", nome: "Lote Ex", publico: "Ex-alunos", quantidade: 30 },
+  ];
+
+  test("fallback NUNCA usa lote de Pais/Ex (mesmo sendo grande)", () => {
+    const big: BatchLike[] = [
+      { id: "PAIS", nome: "Pais", publico: "Pais/Responsáveis", quantidade: 9999 },
+      { id: "GERAL", nome: "Geral", publico: "Alunos", quantidade: 100 },
+    ];
+    expect(pickFallbackLote(big)?.id).toBe("GERAL");
+  });
+
+  test("enrichTicket deriva tipoTitular do tipo do usuário (pai → responsavel)", () => {
+    const t = enrichTicket({ loteId: "PADRAO" }, { tipo: "pai", ano: "3", turma: "B" });
+    expect(t.tipoTitular).toBe("responsavel");
+  });
+
+  test("pai salvo (por engano) no Padrão é corrigido para o lote de Pais", () => {
+    const t = enrichTicket({ loteId: "PADRAO" }, { tipo: "pai" });
+    // loteId aponta p/ Padrão (válido), mas categoria é responsavel:
+    expect(idealCategoryLote(t, bs)).toBe("PAIS");
+  });
+
+  test("ex-aluno é roteado para o lote Ex (ou Ambos)", () => {
+    const t = enrichTicket({}, { tipo: "ex_aluno" });
+    expect(idealCategoryLote(t, bs)).toBe("EX");
+  });
+
+  test("aluno NÃO tem categoria definitiva (não deve ser movido)", () => {
+    expect(idealCategoryLote({ ano: "3", turma: "B" }, bs)).toBeNull();
+    expect(idealCategoryLote(enrichTicket({}, { tipo: "aluno" }), bs)).toBeNull();
+  });
+
+  test("aluno órfão cai no lote geral (Padrão), nunca em Pais/Ex", () => {
+    expect(resolveLoteId(enrichTicket({ loteId: "DELETADO" }, { tipo: "aluno" }), bs)).toBe("PADRAO");
   });
 });
 

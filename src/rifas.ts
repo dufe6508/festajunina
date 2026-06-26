@@ -179,6 +179,52 @@ export const releaseTicket = (book: RaffleBook, ticketNumber: number): RaffleBoo
   return recomputeBook({ ...book, tickets });
 };
 
+// ── Vende TODAS as rifas disponíveis de um bloquinho de uma vez ──
+export const sellAllInBook = (
+  book: RaffleBook,
+  opts: { soldTo?: string | null; paymentStatus?: PaymentStatus; soldAt?: string } = {}
+): RaffleBook => {
+  const at = opts.soldAt ?? new Date().toISOString();
+  const tickets = book.tickets.map((t) =>
+    t.status === "available"
+      ? {
+          ...t,
+          status: "sold" as TicketStatus,
+          paymentStatus: opts.paymentStatus ?? "paid",
+          soldTo: opts.soldTo ?? null,
+          soldAt: at,
+        }
+      : t
+  );
+  return recomputeBook({ ...book, tickets });
+};
+
+// ── Exporta rifas para CSV (uma linha por rifa) ──
+export const booksToCSV = (books: RaffleBook[]): string => {
+  const head = ["Ano", "Turma", "Bloco", "Rifa", "Status", "Preco", "VendidaPara", "VendidaEm"];
+  const rows = [head.join(",")];
+  const ordered = [...books].sort(
+    (a, b) => a.classId.localeCompare(b.classId) || a.bookNumber - b.bookNumber
+  );
+  for (const b of ordered) {
+    for (const t of b.tickets) {
+      rows.push(
+        [
+          b.yearId,
+          b.classId,
+          b.bookNumber,
+          t.number,
+          t.status === "sold" ? "Vendida" : "Disponível",
+          t.price.toFixed(2),
+          `"${(t.soldTo || "").replace(/"/g, '""')}"`,
+          t.soldAt || "",
+        ].join(",")
+      );
+    }
+  }
+  return rows.join("\n");
+};
+
 const ticketAgg = (books: RaffleBook[]) => {
   let total = 0,
     sold = 0,
@@ -192,12 +238,10 @@ const ticketAgg = (books: RaffleBook[]) => {
       expected += t.price;
       if (t.status === "sold") {
         sold++;
-        if (t.paymentStatus === "paid") {
-          paid++;
-          revenue += t.price;
-        } else {
-          pending++;
-        }
+        // Toda rifa vendida conta como arrecadada (valor total das vendidas).
+        revenue += t.price;
+        if (t.paymentStatus === "pending") pending++;
+        else paid++;
       }
     }
   }

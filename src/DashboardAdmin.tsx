@@ -53,7 +53,7 @@ import { IoEyeOutline } from "react-icons/io5";
 import { AiOutlineEyeInvisible } from "react-icons/ai";
 import { MdGroups } from "react-icons/md";
 import { LuTicketPlus, LuTicketCheck } from "react-icons/lu";
-import { findBestLoteId, resolveLoteId } from "./loteMatching";
+import { findBestLoteId, resolveLoteId, enrichTicket, idealCategoryLote } from "./loteMatching";
 import RifasModule from "./RifasModule";
 import { fetchAllBooks } from "./rifasService";
 import { rifaRevenue as computeRifaRevenue } from "./rifas";
@@ -877,39 +877,47 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         const allT: any[] = [];
         ticketsSnap.forEach((d) => allT.push({ id: d.id, ...d.data() }));
 
-        // ─── AUTO-RECONCILIAÇÃO DE ÓRFÃOS ───
-        // Persiste um loteId VÁLIDO em todo ingresso cujo loteId esteja ausente
-        // ou apontando para um lote inexistente (ex: lote excluído / compra antiga
-        // sem lote). Usa resolveLoteId (best-fit > fallback), então nenhum ingresso
-        // fica órfão e a soma dos lotes passa a bater com o total do banco.
+        // ─── AUTO-RECONCILIAÇÃO DE LOTE ───
+        // 1) Ingressos de PAIS/EX-ALUNOS são roteados para o lote dedicado da sua
+        //    categoria, MESMO que hoje apontem (por engano) para outro lote válido
+        //    — corrige o caso de pais que caíram no "Lote Padrão".
+        // 2) Ingressos sem lote válido recebem um lote por best-fit > fallback
+        //    (fallback nunca usa lotes de Pais/Ex). Assim nenhum ingresso fica
+        //    órfão e a soma dos lotes bate com o total do banco.
+        // Categoria do titular é derivada do ingresso OU do usuário (webhook/manual
+        // não setam tipoTitular, então um pai ficava sem categoria).
+        const usuariosSnap = await getDocs(collection(db, "usuarios"));
+        const uInfo: Record<string, any> = {};
+        usuariosSnap.forEach((d) => {
+          const x: any = d.data() || {};
+          uInfo[d.id] = { tipo: x.tipo, ano: x.ano, turma: x.turma };
+        });
+
         const loteValido = (lid: any) => lid && sorted.some((b: any) => b.id === lid);
-        const consertados = new Set<string>();
+        const consertados: Record<string, { loteId: string; type: string }> = {};
         await Promise.all(
           allT.map(async (t) => {
-            if (loteValido(t.loteId)) return; // já tem lote válido
-            const novoId = resolveLoteId(t, sorted);
-            if (!novoId) return; // não há lote nenhum p/ atribuir
-            const lote = sorted.find((b: any) => b.id === novoId);
+            const enriched = enrichTicket(t, uInfo[t.userId]);
+            const cat = idealCategoryLote(enriched, sorted); // Pais/Ex definitivo
+            let alvo: string | null = null;
+            if (cat && cat !== t.loteId) alvo = cat; // corrige pai/ex mal-roteado
+            else if (!loteValido(t.loteId)) alvo = resolveLoteId(enriched, sorted);
+            if (!alvo || alvo === t.loteId) return;
+            const lote = sorted.find((b: any) => b.id === alvo);
+            const novoType = lote?.nome || t.type || "Acesso Geral";
             try {
-              await updateDoc(doc(db, "ingressos", t.id), {
-                loteId: novoId,
-                type: lote?.nome || t.type || "Acesso Geral",
-              });
-              t.loteId = novoId; // reflete localmente p/ a contagem abaixo
-              t.type = lote?.nome || t.type;
-              consertados.add(t.id);
+              await updateDoc(doc(db, "ingressos", t.id), { loteId: alvo, type: novoType });
+              t.loteId = alvo; // reflete localmente p/ a contagem abaixo
+              t.type = novoType;
+              consertados[t.id] = { loteId: alvo, type: novoType };
             } catch {
-              /* regra/permite — ignora, contagem ainda usa resolveLoteId */
+              /* regra/permite — ignora; contagem ainda usa resolveLoteId */
             }
           })
         );
-        if (consertados.size > 0) {
+        if (Object.keys(consertados).length > 0) {
           setAllTickets((prev) =>
-            prev.map((t) =>
-              consertados.has(t.id)
-                ? { ...t, loteId: allT.find((x) => x.id === t.id)?.loteId, type: allT.find((x) => x.id === t.id)?.type }
-                : t
-            )
+            prev.map((t) => (consertados[t.id] ? { ...t, ...consertados[t.id] } : t))
           );
         }
 
@@ -4569,11 +4577,6 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                       <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
                         <p className="text-xs text-zinc-500">Rifas</p>
                         <p className="mt-1 text-lg font-black tabular-nums text-white">{fmt(rifas)}</p>
-                        {rifaFin.pendentes > 0 && (
-                          <p className="mt-0.5 text-[11px] text-amber-400">
-                            {rifaFin.pendentes} rifa(s) c/ pgto pendente
-                          </p>
-                        )}
                       </div>
                       <div className="rounded-xl border border-white/20 bg-white/[0.04] p-4">
                         <p className="text-xs text-zinc-400">Total</p>

@@ -64,9 +64,18 @@ const publicoRank = (p?: string): number => {
   if (p === "Alunos") return 1;
   return 2;
 };
+// Lotes dedicados a públicos específicos NUNCA devem receber ingressos genéricos
+// de fallback (senão um aluno avulso cairia no lote de Pais, por ex).
+const isDedicatedPublic = (p?: string): boolean =>
+  p === "Pais/Responsáveis" || p === "Ex-alunos";
+
 export const pickFallbackLote = (batches: BatchLike[]): BatchLike | null => {
   if (!batches || batches.length === 0) return null;
-  return [...batches].sort((a, b) => {
+  // Preferimos lotes gerais (não dedicados a Pais/Ex). Se só existirem dedicados,
+  // aí sim usamos qualquer um para não deixar o ingresso órfão.
+  const gerais = batches.filter((b) => !isDedicatedPublic(b.publico));
+  const pool = gerais.length > 0 ? gerais : batches;
+  return [...pool].sort((a, b) => {
     const qa = Number(a.quantidade) || 0;
     const qb = Number(b.quantidade) || 0;
     if (qb !== qa) return qb - qa;
@@ -74,6 +83,44 @@ export const pickFallbackLote = (batches: BatchLike[]): BatchLike | null => {
     if (pr !== 0) return pr;
     return (a.nome || "").localeCompare(b.nome || "");
   })[0];
+};
+
+// Lote "ideal" pela CATEGORIA do titular (responsavel / ex_aluno), ignorando o
+// loteId atual. Usado para CORRIGIR ingressos de pais/ex que tenham sido salvos
+// (por engano) em outro lote. Retorna null para alunos (que podem escolher
+// legitimamente entre vários lotes — não devem ser movidos automaticamente).
+export const idealCategoryLote = (t: TicketLike, batches: BatchLike[]): string | null => {
+  if (t.tipoTitular === "responsavel") {
+    const lote = batches.find((b) => b.publico === "Pais/Responsáveis");
+    return lote ? lote.id : null;
+  }
+  if (t.tipoTitular === "ex_aluno") {
+    const lote =
+      batches.find((b) => b.publico === "Ex-alunos") ||
+      batches.find((b) => b.publico === "Ambos");
+    return lote ? lote.id : null;
+  }
+  return null;
+};
+
+// Enriquece um ingresso com tipoTitular/turma/ano derivados do usuário, quando
+// o próprio ingresso não os tem (ingressos do webhook/manual não setam
+// tipoTitular, então um pai ficava sem categoria). Função pura.
+export interface UserInfo {
+  tipo?: string; // "aluno" | "pai" | "ex_aluno"
+  ano?: string | number | null;
+  turma?: string | null;
+}
+export const enrichTicket = (t: TicketLike, user?: UserInfo): TicketLike => {
+  if (!user) return t;
+  const out: TicketLike = { ...t };
+  if (!out.tipoTitular) {
+    if (user.tipo === "pai") out.tipoTitular = "responsavel";
+    else if (user.tipo === "ex_aluno") out.tipoTitular = "ex_aluno";
+  }
+  if ((out.ano == null || out.ano === "") && user.ano != null) out.ano = user.ano;
+  if ((out.turma == null || out.turma === "") && user.turma != null) out.turma = user.turma;
+  return out;
 };
 
 // Igual ao findBestLoteId, mas NUNCA retorna null quando existe ao menos um lote:

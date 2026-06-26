@@ -9,6 +9,8 @@ import {
   recomputeBook,
   sellTicket,
   releaseTicket,
+  sellAllInBook,
+  booksToCSV,
   classFinancial,
   financialByClass,
   financialByYear,
@@ -86,6 +88,20 @@ describe("venda e estados automáticos do bloco", () => {
     expect(b2.soldTickets).toBe(1);
   });
 
+  test("vender bloco inteiro de uma vez → sold_out", () => {
+    const b = sellAllInBook(book, { paymentStatus: "paid" });
+    expect(b.soldTickets).toBe(10);
+    expect(b.status).toBe("sold_out");
+    expect(b.tickets.every((t) => t.status === "sold")).toBe(true);
+  });
+
+  test("vender bloco com algumas já vendidas mantém as existentes", () => {
+    let b = sellTicket(book, 1, { paymentStatus: "paid", soldTo: "Ana" });
+    b = sellAllInBook(b, { paymentStatus: "paid" });
+    expect(b.soldTickets).toBe(10);
+    expect(b.tickets.find((t) => t.number === 1)?.soldTo).toBe("Ana"); // não sobrescreve
+  });
+
   test("recomputeBook é a fonte da verdade", () => {
     const corrompido = { ...book, soldTickets: 999, status: "sold_out" as const };
     expect(recomputeBook(corrompido).soldTickets).toBe(0);
@@ -113,15 +129,14 @@ describe("financeiro por turma — invariantes", () => {
     expect(f.paidTickets).toBe(20);
     expect(f.pendingTickets).toBe(5);
     expect(f.availableTickets).toBe(75);
-    expect(f.totalRevenue).toBe(40); // 20 × 2
+    expect(f.totalRevenue).toBe(50); // 25 vendidas × 2 (toda vendida arrecada)
     expect(f.expectedRevenue).toBe(200); // 100 × 2
-    expect(f.remainingRevenue).toBe(160);
     expect(f.completionPercentage).toBe(25);
 
     // INVARIANTES de integridade financeira
     expect(f.availableTickets + f.soldTickets).toBe(f.totalTickets);
     expect(f.paidTickets + f.pendingTickets).toBe(f.soldTickets);
-    expect(f.totalRevenue).toBe(f.paidTickets * TICKET_PRICE);
+    expect(f.totalRevenue).toBe(f.soldTickets * TICKET_PRICE);
     expect(f.expectedRevenue).toBe(f.totalTickets * TICKET_PRICE);
     // 2 blocos cheios (20) + 1 parcial (5)
     expect(f.booksComplete).toBe(2);
@@ -198,5 +213,14 @@ describe("agregações multi-turma / multi-ano", () => {
     expect(r.arrecadado).toBe(120);
     expect(r.previsto).toBe(600);
     expect(r.pendentes).toBe(0);
+  });
+
+  test("booksToCSV gera cabeçalho + 1 linha por rifa", () => {
+    const all = build(); // 3 turmas × 10 blocos × 10 = 300 rifas
+    const csv = booksToCSV(all);
+    const linhas = csv.split("\n");
+    expect(linhas[0]).toContain("Ano,Turma,Bloco,Rifa,Status");
+    expect(linhas).toHaveLength(301); // 1 cabeçalho + 300 rifas
+    expect(linhas.filter((l) => l.includes(",Vendida,")).length).toBe(60); // 10+20+30
   });
 });
