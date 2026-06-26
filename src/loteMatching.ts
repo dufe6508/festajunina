@@ -22,6 +22,7 @@ export interface BatchLike {
   nome?: string;
   publico?: string;
   turmasVisiveis?: string[];
+  quantidade?: number | string;
 }
 
 export const findBestLoteId = (
@@ -53,6 +54,36 @@ export const findBestLoteId = (
     if (lote) return lote.id;
   }
   return null;
+};
+
+// Escolhe um lote "geral" de fallback quando nenhum critério específico casa.
+// Preferência: maior capacidade (quantidade) — normalmente o lote padrão/geral.
+// Desempate: publico "Ambos" > "Alunos" > ordem alfabética do nome.
+const publicoRank = (p?: string): number => {
+  if (p === "Ambos") return 0;
+  if (p === "Alunos") return 1;
+  return 2;
+};
+export const pickFallbackLote = (batches: BatchLike[]): BatchLike | null => {
+  if (!batches || batches.length === 0) return null;
+  return [...batches].sort((a, b) => {
+    const qa = Number(a.quantidade) || 0;
+    const qb = Number(b.quantidade) || 0;
+    if (qb !== qa) return qb - qa;
+    const pr = publicoRank(a.publico) - publicoRank(b.publico);
+    if (pr !== 0) return pr;
+    return (a.nome || "").localeCompare(b.nome || "");
+  })[0];
+};
+
+// Igual ao findBestLoteId, mas NUNCA retorna null quando existe ao menos um lote:
+// se nada específico casar, cai no lote de fallback. Garante que nenhum ingresso
+// fique "órfão" — todo ingresso é contabilizado em exatamente um lote.
+export const resolveLoteId = (t: TicketLike, batches: BatchLike[]): string | null => {
+  const best = findBestLoteId(t, batches);
+  if (best) return best;
+  const fb = pickFallbackLote(batches);
+  return fb ? fb.id : null;
 };
 
 export interface Reconciliation {

@@ -53,7 +53,7 @@ import { IoEyeOutline } from "react-icons/io5";
 import { AiOutlineEyeInvisible } from "react-icons/ai";
 import { MdGroups } from "react-icons/md";
 import { LuTicketPlus, LuTicketCheck } from "react-icons/lu";
-import { findBestLoteId } from "./loteMatching";
+import { findBestLoteId, resolveLoteId } from "./loteMatching";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -860,8 +860,44 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
         const allT: any[] = [];
         ticketsSnap.forEach((d) => allT.push({ id: d.id, ...d.data() }));
 
+        // ─── AUTO-RECONCILIAÇÃO DE ÓRFÃOS ───
+        // Persiste um loteId VÁLIDO em todo ingresso cujo loteId esteja ausente
+        // ou apontando para um lote inexistente (ex: lote excluído / compra antiga
+        // sem lote). Usa resolveLoteId (best-fit > fallback), então nenhum ingresso
+        // fica órfão e a soma dos lotes passa a bater com o total do banco.
+        const loteValido = (lid: any) => lid && sorted.some((b: any) => b.id === lid);
+        const consertados = new Set<string>();
+        await Promise.all(
+          allT.map(async (t) => {
+            if (loteValido(t.loteId)) return; // já tem lote válido
+            const novoId = resolveLoteId(t, sorted);
+            if (!novoId) return; // não há lote nenhum p/ atribuir
+            const lote = sorted.find((b: any) => b.id === novoId);
+            try {
+              await updateDoc(doc(db, "ingressos", t.id), {
+                loteId: novoId,
+                type: lote?.nome || t.type || "Acesso Geral",
+              });
+              t.loteId = novoId; // reflete localmente p/ a contagem abaixo
+              t.type = lote?.nome || t.type;
+              consertados.add(t.id);
+            } catch {
+              /* regra/permite — ignora, contagem ainda usa resolveLoteId */
+            }
+          })
+        );
+        if (consertados.size > 0) {
+          setAllTickets((prev) =>
+            prev.map((t) =>
+              consertados.has(t.id)
+                ? { ...t, loteId: allT.find((x) => x.id === t.id)?.loteId, type: allT.find((x) => x.id === t.id)?.type }
+                : t
+            )
+          );
+        }
+
         const synced = sorted.map((b) => {
-          const count = allT.filter((t) => findBestLoteId(t, sorted) === b.id).length;
+          const count = allT.filter((t) => resolveLoteId(t, sorted) === b.id).length;
           // Corrige sempre que o contador divergir da contagem real (inclusão OU exclusão)
           if (b.ingressosAssociados == null || b.ingressosAssociados !== count) {
             updateDoc(doc(db, "lotes", b.id), { ingressosAssociados: count }).catch(() => {});
@@ -5543,7 +5579,7 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {batches.map((batch) => {
-                    const pertenceAoLote = (t: any) => findBestLoteId(t, batches) === batch.id;
+                    const pertenceAoLote = (t: any) => resolveLoteId(t, batches) === batch.id;
                     const vendidos = (allTickets || []).filter(
                       (t) => t.pagamentoConfirmado && pertenceAoLote(t)
                     ).length;
@@ -5757,9 +5793,12 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                 </div>
               )}
 
-              {/* Aviso de ingressos sem lote correspondente (não contabilizados em nenhum card acima) */}
+              {/* Aviso de ingressos sem lote correspondente. Com resolveLoteId todo
+                  ingresso cai em algum lote (best-fit > fallback), então só sobra
+                  "órfão" se NÃO existir nenhum lote cadastrado. Nesse caso o aviso
+                  orienta a criar um lote. */}
               {!loadingBatches && (() => {
-                const orfaos = (allTickets || []).filter((t) => findBestLoteId(t, batches) === null);
+                const orfaos = (allTickets || []).filter((t) => resolveLoteId(t, batches) === null);
                 if (orfaos.length === 0) return null;
                 return (
                   <div className="flex items-start gap-3 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl px-5 py-4">
@@ -5767,14 +5806,11 @@ function DashboardAdminInner({ currentUser, onLogout, onBack }) {
                     <div>
                       <p className="text-amber-300 text-sm font-semibold">
                         {orfaos.length} ingresso{orfaos.length !== 1 ? "s" : ""} sem lote
-                        correspondente
                       </p>
                       <p className="text-zinc-500 text-xs mt-1">
-                        Esses ingressos foram criados com um "loteId" que não existe
-                        mais nesta lista (ex: lote excluído, ou ingresso vindo de outro
-                        fluxo de compra que não preencheu o lote). Por isso eles não
-                        somam em nenhum card acima e a soma dos lotes não bate com o
-                        total de "Vendidos" da Visão Geral.
+                        Crie pelo menos um lote para que todos os ingressos sejam
+                        contabilizados. Assim que houver um lote, estes ingressos
+                        passam a contar automaticamente.
                       </p>
                     </div>
                   </div>

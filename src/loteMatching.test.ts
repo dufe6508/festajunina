@@ -1,4 +1,11 @@
-import { findBestLoteId, reconcile, BatchLike, TicketLike } from "./loteMatching";
+import {
+  findBestLoteId,
+  resolveLoteId,
+  pickFallbackLote,
+  reconcile,
+  BatchLike,
+  TicketLike,
+} from "./loteMatching";
 
 const batches: BatchLike[] = [
   { id: "L_TURMA", nome: "Lote Turmas", publico: "Alunos", turmasVisiveis: ["9A", "9B"] },
@@ -45,6 +52,55 @@ describe("findBestLoteId — mapeamento ingresso → lote", () => {
     // ticket que poderia casar por loteId E por turma → só conta o loteId
     const t: TicketLike = { loteId: "L_PAIS", ano: "9", turma: "A" };
     expect(findBestLoteId(t, batches)).toBe("L_PAIS");
+  });
+});
+
+describe("pickFallbackLote — lote geral de fallback", () => {
+  test("escolhe o lote de maior capacidade (quantidade)", () => {
+    const bs: BatchLike[] = [
+      { id: "A", nome: "A", publico: "Alunos", quantidade: 100 },
+      { id: "B", nome: "B", publico: "Alunos", quantidade: 700 },
+      { id: "C", nome: "C", publico: "Alunos", quantidade: 30 },
+    ];
+    expect(pickFallbackLote(bs)?.id).toBe("B");
+  });
+  test("empate de capacidade → prioriza publico Ambos > Alunos", () => {
+    const bs: BatchLike[] = [
+      { id: "A", nome: "A", publico: "Alunos", quantidade: 100 },
+      { id: "B", nome: "B", publico: "Ambos", quantidade: 100 },
+    ];
+    expect(pickFallbackLote(bs)?.id).toBe("B");
+  });
+  test("lista vazia → null", () => {
+    expect(pickFallbackLote([])).toBeNull();
+  });
+});
+
+describe("resolveLoteId — NUNCA deixa órfão quando há lote", () => {
+  test("órfão real cai no lote de fallback (maior capacidade)", () => {
+    const t: TicketLike = { loteId: "DELETADO" };
+    // batches tem L_TURMA(sem quantidade) ... adiciona um geral grande:
+    const bs: BatchLike[] = [...batches, { id: "L_GERAL700", nome: "Padrão", publico: "Alunos", quantidade: 700 }];
+    expect(findBestLoteId(t, bs)).toBeNull();
+    expect(resolveLoteId(t, bs)).toBe("L_GERAL700");
+  });
+  test("best-fit ainda tem prioridade sobre fallback", () => {
+    const bs: BatchLike[] = [...batches, { id: "BIG", nome: "Big", publico: "Alunos", quantidade: 999 }];
+    expect(resolveLoteId({ tipoTitular: "responsavel" }, bs)).toBe("L_PAIS");
+  });
+  test("sem nenhum lote → null (não há onde alocar)", () => {
+    expect(resolveLoteId({ loteId: "X" }, [])).toBeNull();
+  });
+  test("ZERO órfãos: todo ingresso resolve para um lote", () => {
+    const tickets: TicketLike[] = [
+      { loteId: "DELETADO" },
+      {},
+      { type: "inexistente" },
+      { ano: "1", turma: "Z" }, // turma sem lote
+    ];
+    for (const t of tickets) {
+      expect(resolveLoteId(t, batches)).not.toBeNull();
+    }
   });
 });
 
