@@ -53,6 +53,7 @@ import { IoEyeOutline } from "react-icons/io5";
 import { AiOutlineEyeInvisible } from "react-icons/ai";
 import { MdGroups } from "react-icons/md";
 import { LuTicketPlus, LuTicketCheck } from "react-icons/lu";
+import { findBestLoteId } from "./loteMatching";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -308,34 +309,8 @@ class AdminErrorBoundary extends React.Component {
   }
 }
 
-// Maps a ticket to its best-matching lote ID. Each ticket maps to exactly one lote
-// to prevent double-counting. Priority: loteId match > name match > turma match
-// (alunos sem tipoTitular only) > tipoTitular fallback (responsavel/ex_aluno).
-const findBestLoteId = (t: any, batchList: any[]): string | null => {
-  if (t.loteId && batchList.some((b) => b.id === t.loteId)) return t.loteId;
-  if (t.type) {
-    const byName = batchList.find((b) => b.nome === t.type);
-    if (byName) return byName.id;
-  }
-  if (!t.tipoTitular) {
-    const key = `${t.ano ?? ""}${t.turma ?? ""}`.trim().toUpperCase();
-    if (key.length > 1) {
-      const byTurma = batchList.find((b) => b.turmasVisiveis && b.turmasVisiveis.includes(key));
-      if (byTurma) return byTurma.id;
-    }
-  }
-  if (t.tipoTitular === "responsavel") {
-    const lote = batchList.find((b) => b.publico === "Pais/Responsáveis");
-    if (lote) return lote.id;
-  }
-  if (t.tipoTitular === "ex_aluno") {
-    const lote =
-      batchList.find((b) => b.publico === "Ex-alunos") ||
-      batchList.find((b) => b.publico === "Ambos");
-    if (lote) return lote.id;
-  }
-  return null;
-};
+// findBestLoteId foi extraído para ./loteMatching (função pura, testável).
+// Mantido o mesmo comportamento: cada ingresso mapeia para no máximo um lote.
 
 function DashboardAdminInner({ currentUser, onLogout, onBack }) {
   const [activeTab, setActiveTab] = useState("admin_scanner");

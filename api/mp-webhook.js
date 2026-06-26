@@ -136,6 +136,24 @@ module.exports = async function handler(req, res) {
       "Convidado";
     const emailDestino = userDoc?.email || payment.payer?.email || "";
 
+    // Resolve o lote pelo ano+turma do usuário
+    const turmaUsuario = userDoc?.turma || "";
+    const anoUsuario = userDoc?.ano || "";
+    let loteId = null;
+    let loteNome = "Acesso Geral";
+    if (turmaUsuario && anoUsuario) {
+      const turmaKey = `${anoUsuario}${turmaUsuario}`;
+      const lotesSnap = await db.collection("lotes").get();
+      for (const loteDoc of lotesSnap.docs) {
+        const loteData = loteDoc.data();
+        if (loteData.turmasVisiveis && loteData.turmasVisiveis.includes(turmaKey)) {
+          loteId = loteDoc.id;
+          loteNome = loteData.nome || "Acesso Geral";
+          break;
+        }
+      }
+    }
+
     // 🔒 Criação atômica: se o cliente (cadastro.tsx) já criou o ingresso
     // para este mesmo mpPaymentId um instante antes, a transação abaixo
     // detecta a reserva existente e `criadoAgora` vem como false — não
@@ -146,7 +164,8 @@ module.exports = async function handler(req, res) {
       (codeGerado) => ({
         userId: userDoc?.id || externalRef || "",
         nomeAluno,
-        type: "Acesso Geral",
+        type: loteNome,
+        loteId: loteId,
         qty: 1,
         price: Number(payment.transaction_amount) || 0,
         code: codeGerado,
@@ -154,8 +173,8 @@ module.exports = async function handler(req, res) {
         paymentMethod: "mercadopago",
         mpPaymentId: String(paymentId),
         statusPagamento: "approved",
-        turma: userDoc?.turma || "",
-        ano: userDoc?.ano || "",
+        turma: turmaUsuario,
+        ano: anoUsuario,
         isTest: false,
         pagamentoConfirmado: true,
         dataPagamento: new Date().toISOString(),
